@@ -166,3 +166,4 @@ Response:
 - Reduce image size
 - Optimize feature extraction
 - Use model quantization
+# waste-bin-backend
