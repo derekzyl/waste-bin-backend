@@ -95,6 +95,14 @@ async def get_commands(bin_id: str):
 # ==================== API ENDPOINTS ====================
 
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for Koyeb or other monitoring services.
+    """
+    return {"status": "healthy", "service": "smart-waste-bin-backend"}
+
+
 @app.get("/")
 async def root():
     return {
