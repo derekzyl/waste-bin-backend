@@ -27,9 +27,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize material classifier
-model_path = os.getenv("MODEL_PATH", "models/material_classifier.pkl")
-classifier = MaterialClassifier(model_path=model_path)
+# Lazy-load material classifier
+_classifier_instance = None
+
+
+def get_classifier():
+    global _classifier_instance
+    if _classifier_instance is None:
+        print("Lazy loading MaterialClassifier...")
+        model_path = os.getenv("MODEL_PATH", "models/material_classifier.pkl")
+        _classifier_instance = MaterialClassifier(model_path=model_path)
+    return _classifier_instance
 
 
 # Request/Response Models
@@ -121,7 +129,11 @@ async def root():
 
 
 @app.post("/api/detect")
-async def detect_material(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def detect_material(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    classifier: MaterialClassifier = Depends(get_classifier),
+):
     """
     Detect material type from uploaded image (In-Memory Processing).
     """
