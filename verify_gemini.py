@@ -19,10 +19,10 @@ def main():
         print(f"Failed to initialize classifier: {e}")
         return
 
-    if classifier.gemini_model:
-        print("Gemini model initialized.")
+    if classifier.client:
+        print("Gemini client initialized.")
     else:
-        print("Gemini model NOT initialized. Check API Key.")
+        print("Gemini client NOT initialized. Check API Key.")
         # Proceeding to test fallback/behavior anyway
 
     print("Creating synthetic organic-like (green) image...")
