@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import uvicorn
 from database import Base, engine, get_db
+from energy_api.routes import router as energy_router
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from image_classifier import MaterialClassifier
@@ -109,6 +110,10 @@ async def health_check():
     Health check endpoint for Koyeb or other monitoring services.
     """
     return {"status": "healthy", "service": "smart-waste-bin-backend"}
+
+
+# Includes
+app.include_router(energy_router)
 
 
 @app.get("/")

@@ -1,0 +1,136 @@
+from datetime import datetime, timedelta
+
+from sqlalchemy.orm import Session
+
+from .models import (
+    EnergyAuditLog,
+    EnergyDevice,
+    EnergySensorConfig,
+    EnergySensorReading,
+)
+
+
+def run_energy_audit(db: Session, device_id: str):
+    """
+    Analyzes latest readings and sensor configurations to generate waste alerts.
+    """
+    # Get device by device_id (string)
+    device = db.query(EnergyDevice).filter(EnergyDevice.device_id == device_id).first()
+    if not device:
+        return []
+
+    # Get latest reading
+    latest = (
+        db
+        .query(EnergySensorReading)
+        .filter(EnergySensorReading.device_id == device_id)
+        .order_by(EnergySensorReading.timestamp.desc())
+        .first()
+    )
+
+    if not latest:
+        return []
+
+    # Get sensor configs
+    configs = (
+        db
+        .query(EnergySensorConfig)
+        .filter(EnergySensorConfig.device_id == device_id)
+        .all()
+    )
+    config_map = {c.sensor_number: c for c in configs}
+
+    alerts = []
+
+    # Analyze both sensors
+    for sensor_num in [1, 2]:
+        config = config_map.get(sensor_num)
+        # If no config specific to this sensor, we use defaults or skip
+        # For this logic, let's assume if no config, we skip detailed semantic analysis
+        # but still check for raw power anomalies
+
+        current = getattr(latest, f"sensor_{sensor_num}_amps", 0)
+        watts = getattr(latest, f"sensor_{sensor_num}_watts", 0)
+
+        if watts < 5.0:  # Skip if device is effectively off
+            continue
+
+        label = config.custom_label.lower() if config else f"sensor {sensor_num}"
+        category = config.appliance_category if config else "Unknown"
+
+        # --- Rule 1: Lighting + High ambient light ---
+        if "light" in label or category == "Lighting":
+            if latest.light_lux > 800:
+                alerts.append({
+                    "sensor": sensor_num,
+                    "type": "lighting_waste",
+                    "severity": "warning",
+                    "message": f"{label}: Lights ON but sufficient natural light ({latest.light_lux} lux)",
+                    "waste_watts": watts,
+                })
+
+        # --- Rule 2: HVAC + Temperature ---
+        if (
+            any(x in label for x in ["ac", "hvac", "cooling", "air con"])
+            or category == "HVAC"
+        ):
+            # Cooling check
+            if latest.temperature_c and latest.temperature_c < 20:
+                alerts.append({
+                    "sensor": sensor_num,
+                    "type": "hvac_overcooling",
+                    "severity": "warning",
+                    "message": f"{label}: Cooling at {watts:.0f}W but room is 20°C or colder ({latest.temperature_c}°C)",
+                    "waste_watts": watts * 0.5,
+                })
+
+        if any(x in label for x in ["heater", "heating"]) or category == "HVAC":
+            # Heating check
+            if latest.temperature_c and latest.temperature_c > 26:
+                alerts.append({
+                    "sensor": sensor_num,
+                    "type": "hvac_overheating",
+                    "severity": "warning",
+                    "message": f"{label}: Heating at {watts:.0f}W but room is 26°C or warmer ({latest.temperature_c}°C)",
+                    "waste_watts": watts * 0.6,
+                })
+
+        # --- Rule 3: Phantom Loads ---
+        # If current is very low but non-zero for a long time (simplified check here)
+        if 0.02 < current < 0.2:
+            alerts.append({
+                "sensor": sensor_num,
+                "type": "phantom_load",
+                "severity": "info",
+                "message": f"{label}: Drawing {watts:.1f}W standby power",
+                "waste_watts": watts,
+            })
+
+    # Save alerts to DB
+    for alert in alerts:
+        # Check if identical alert exists recently (deduplication)
+        recent = (
+            db
+            .query(EnergyAuditLog)
+            .filter(
+                EnergyAuditLog.device_id == device_id,
+                EnergyAuditLog.sensor_number == alert["sensor"],
+                EnergyAuditLog.audit_type == alert["type"],
+                EnergyAuditLog.timestamp > datetime.utcnow() - timedelta(minutes=10),
+            )
+            .first()
+        )
+
+        if not recent:
+            log = EnergyAuditLog(
+                device_id=device_id,
+                sensor_number=alert["sensor"],
+                audit_type=alert["type"],
+                severity=alert["severity"],
+                message=alert["message"],
+                estimated_waste_watts=alert["waste_watts"],
+            )
+            db.add(log)
+
+    db.commit()
+    return alerts
