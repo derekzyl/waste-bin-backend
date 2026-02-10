@@ -6,6 +6,7 @@ import numpy as np
 import uvicorn
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
+from health_monitoring.routes import router as health_router
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from image_classifier import MaterialClassifier
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Smart Waste Bin Backend API", version="2.0.0")
+app = FastAPI(title="Student IoT Multi-Project Backend", version="2.0.0")
 
 # CORS middleware
 app.add_middleware(
@@ -156,21 +157,27 @@ async def health_check():
 
 # Includes
 app.include_router(energy_router)
+app.include_router(health_router)
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "Smart Waste Bin Backend API",
+        "message": "Student IoT Multi-Project Backend",
         "version": "2.1.0",
         "database": "PostgreSQL",
-        "endpoints": {
-            "detect": "/api/detect (POST)",
-            "bins": "/api/bins (GET)",
-            "bin_status": "/api/bins/{bin_id} (GET)",
-            "update_bins": "/api/bins/update (POST)",
-            "events": "/api/events (GET)",
-            "detections": "/api/detections (GET)",
+        "projects": {
+            "waste_management": {
+                "prefix": "/api",
+                "endpoints": {
+                    "detect": "/api/detect (POST)",
+                    "bins": "/api/bins (GET)",
+                    "bin_status": "/api/bins/{bin_id} (GET)",
+                    "update_bins": "/api/bins/update (POST)",
+                },
+            },
+            "energy_audit": {"prefix": "/energy", "docs": "/energy/docs"},
+            "health_monitoring": {"prefix": "/health", "docs": "/health/docs"},
         },
     }
 
