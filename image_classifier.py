@@ -6,19 +6,16 @@ Uses computer vision and machine learning for accurate waste material detection
 import os
 from typing import Dict, Optional
 
-import cv2
-
-# Disable OpenCV threading to prevent potential deadlocks/crashes in server environments
-cv2.setNumThreads(0)
-
 import joblib
 import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+
+# Move heavy imports to lazy loading or global but checked
+# from sklearn.ensemble import RandomForestClassifier
+# from sklearn.preprocessing import StandardScaler
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +28,9 @@ class MaterialClassifier:
     """
 
     def __init__(self, model_path: Optional[str] = None):
+        # Lazy import sklearn
+        from sklearn.preprocessing import StandardScaler
+
         self.model_path = model_path
         self.model = None
         self.scaler = StandardScaler()
@@ -61,6 +61,8 @@ class MaterialClassifier:
         Extract comprehensive features from image for classification.
         Returns a feature vector combining multiple image characteristics.
         """
+        import cv2  # Lazy import
+
         features = []
 
         # Resize image for consistent processing
@@ -207,6 +209,8 @@ class MaterialClassifier:
         # Try Gemini Classification first
         if self.client:
             try:
+                import cv2  # Lazy import
+
                 # Convert CV2 BGR to PIL RGB
                 img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(img_rgb)
@@ -350,6 +354,8 @@ class MaterialClassifier:
 
         # Train Random Forest classifier
         print("Training model...")
+        from sklearn.ensemble import RandomForestClassifier  # Lazy import
+
         self.model = RandomForestClassifier(
             n_estimators=100, max_depth=20, random_state=42, n_jobs=-1
         )

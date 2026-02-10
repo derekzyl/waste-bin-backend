@@ -84,6 +84,18 @@ def run_energy_audit(db: Session, device_id: str):
                     "waste_watts": watts * 0.5,
                 })
 
+            # --- Rule 4: Free Cooling Opportunity ---
+            # If AC is ON and Outdoor Temp is significantly cooler than Indoor Temp
+            if latest.outdoor_temp_c and latest.temperature_c:
+                if (latest.temperature_c - latest.outdoor_temp_c) > 3.0:
+                    alerts.append({
+                        "sensor": sensor_num,
+                        "type": "free_cooling_avail",
+                        "severity": "info",
+                        "message": f"{label}: AC ON but it is cooler outside ({latest.outdoor_temp_c}°C). Open windows to save energy.",
+                        "waste_watts": watts,
+                    })
+
         if any(x in label for x in ["heater", "heating"]) or category == "HVAC":
             # Heating check
             if latest.temperature_c and latest.temperature_c > 26:

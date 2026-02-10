@@ -2,7 +2,6 @@ import os
 from datetime import datetime
 from typing import Optional
 
-import cv2
 import numpy as np
 import uvicorn
 from database import Base, engine, get_db
@@ -143,6 +142,8 @@ async def detect_material(
     Detect material type from uploaded image (In-Memory Processing).
     """
     try:
+        import cv2  # Lazy import
+
         # Read file into memory
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
