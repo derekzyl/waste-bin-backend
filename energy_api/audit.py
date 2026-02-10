@@ -133,11 +133,20 @@ def run_energy_audit(db: Session, device_id: str):
                 })
 
         # --- Rule 2: HVAC + Temperature ---
-        if (
-            any(x in label for x in ["ac", "hvac", "cooling", "air con"])
-            or category == "HVAC"
-        ):
-            # Cooling check
+        # 2a. Air Conditioning Logic
+        if category == "AC" or any(x in label for x in ["ac", "cooling", "air con"]):
+            # Alert if AC is ON (> 200W) but room is already cold (< 21°C) AND it's not hot outside (< 24°C)
+            if watts > 200 and latest.temperature_c and latest.outdoor_temp_c:
+                if latest.temperature_c < 21.0 and latest.outdoor_temp_c < 24.0:
+                    alerts.append({
+                        "sensor": sensor_num,
+                        "type": "hvac_inefficient_use",
+                        "severity": "warning",
+                        "message": f"{label}: AC is running but it's cool inside ({latest.temperature_c}°C) and outside ({latest.outdoor_temp_c}°C). Consider turning off.",
+                        "waste_watts": watts,
+                    })
+
+            # Cooling check (Standard Overcooling)
             if latest.temperature_c and latest.temperature_c < 20:
                 alerts.append({
                     "sensor": sensor_num,
@@ -156,6 +165,19 @@ def run_energy_audit(db: Session, device_id: str):
                         "type": "free_cooling_avail",
                         "severity": "info",
                         "message": f"{label}: AC ON but it is cooler outside ({latest.outdoor_temp_c}°C). Open windows.",
+                        "waste_watts": watts,
+                    })
+
+        # 2b. Heater Logic
+        if category == "Heater" or any(x in label for x in ["heater", "heating"]):
+            # Alert if Heater is ON (> 200W) but room is hot (> 25°C) AND outdoor is mild (> 20°C)
+            if watts > 200 and latest.temperature_c and latest.outdoor_temp_c:
+                if latest.temperature_c > 25.0 and latest.outdoor_temp_c > 20.0:
+                    alerts.append({
+                        "sensor": sensor_num,
+                        "type": "hvac_inefficient_use",
+                        "severity": "warning",
+                        "message": f"{label}: Heater running but it's warm inside ({latest.temperature_c}°C) and outside ({latest.outdoor_temp_c}°C).",
                         "waste_watts": watts,
                     })
 

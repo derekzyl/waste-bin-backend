@@ -7,7 +7,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .audit import run_energy_audit
-from .models import EnergyAuditLog, EnergyDevice, EnergyGoal, EnergySensorReading
+from .models import (
+    EnergyAuditLog,
+    EnergyDevice,
+    EnergyGoal,
+    EnergySensorConfig,
+    EnergySensorReading,
+)
+from .schemas import SensorConfigUpdate
 
 router = APIRouter(prefix="/energy", tags=["Energy"])
 
@@ -69,6 +76,53 @@ def get_device(device_id: str, db: Session = Depends(get_db)):
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
+
+
+@router.post("/devices/{device_id}/config")
+def update_sensor_config(
+    device_id: str, config: SensorConfigUpdate, db: Session = Depends(get_db)
+):
+    # Check if device exists
+    device = db.query(EnergyDevice).filter(EnergyDevice.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    # Check if config exists for this sensor
+    db_config = (
+        db
+        .query(EnergySensorConfig)
+        .filter(
+            EnergySensorConfig.device_id == device_id,
+            EnergySensorConfig.sensor_number == config.sensor_number,
+        )
+        .first()
+    )
+
+    if db_config:
+        db_config.custom_label = config.custom_label
+        db_config.appliance_category = config.appliance_category
+    else:
+        db_config = EnergySensorConfig(
+            device_id=device_id,
+            sensor_number=config.sensor_number,
+            custom_label=config.custom_label,
+            appliance_category=config.appliance_category,
+        )
+        db.add(db_config)
+
+    db.commit()
+    db.refresh(db_config)
+    return db_config
+
+
+@router.get("/devices/{device_id}/config")
+def get_sensor_configs(device_id: str, db: Session = Depends(get_db)):
+    return (
+        db
+        .query(EnergySensorConfig)
+        .filter(EnergySensorConfig.device_id == device_id)
+        .all()
+    )
 
 
 # --- Goal Endpoints ---
