@@ -86,6 +86,23 @@ async def startup_event():
                 )
                 conn.commit()
                 print("Migration complete.")
+
+            # Check for voltage columns
+            for col in ["sensor_1_voltage", "sensor_2_voltage"]:
+                result = conn.execute(
+                    text(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_name='energy_sensor_readings' AND column_name='{col}'"
+                    )
+                )
+                if not result.fetchone():
+                    print(f"Migrating DB: Adding {col} column...")
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE energy_sensor_readings ADD COLUMN {col} FLOAT DEFAULT 220.0"
+                        )
+                    )
+                    conn.commit()
     except Exception as e:
         print(f"Startup migration error: {e}")
 

@@ -62,8 +62,10 @@ class EnergySensorReading(Base):
 
     sensor_1_amps = Column(Float)
     sensor_1_watts = Column(Float)
+    sensor_1_voltage = Column(Float)
     sensor_2_amps = Column(Float)
     sensor_2_watts = Column(Float)
+    sensor_2_voltage = Column(Float)
 
     temperature_c = Column(Float)
     humidity_percent = Column(Float)

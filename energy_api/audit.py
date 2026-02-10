@@ -43,14 +43,60 @@ def run_energy_audit(db: Session, device_id: str):
     alerts = []
 
     # Analyze both sensors
+
+    # Calculate daily usage for alert (Simplified)
+    # Get readings for today
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    todays_readings = (
+        db
+        .query(EnergySensorReading)
+        .filter(
+            EnergySensorReading.device_id == device_id,
+            EnergySensorReading.timestamp >= today_start,
+        )
+        .all()
+    )
+
+    # Estimate kWh: Sum(watts) * 5 seconds / (3600 * 1000)
+    total_watts_accumulated = sum(
+        (r.sensor_1_watts or 0) + (r.sensor_2_watts or 0) for r in todays_readings
+    )
+    daily_kwh = (total_watts_accumulated * 5) / (3600 * 1000)
+
+    # --- Rule 5: Daily Usage Alert ---
+    DAILY_LIMIT_KWH = 20.0
+    if daily_kwh > DAILY_LIMIT_KWH:
+        alerts.append({
+            "sensor": 0,  # System wide
+            "type": "daily_limit_exceeded",
+            "severity": "warning",
+            "message": f"Daily usage ({daily_kwh:.2f} kWh) exceeded limit of {DAILY_LIMIT_KWH} kWh.",
+            "waste_watts": 0,
+        })
+
     for sensor_num in [1, 2]:
         config = config_map.get(sensor_num)
-        # If no config specific to this sensor, we use defaults or skip
-        # For this logic, let's assume if no config, we skip detailed semantic analysis
-        # but still check for raw power anomalies
-
         current = getattr(latest, f"sensor_{sensor_num}_amps", 0)
         watts = getattr(latest, f"sensor_{sensor_num}_watts", 0)
+        voltage = getattr(latest, f"sensor_{sensor_num}_voltage", 220.0)
+
+        # --- Rule 6: Voltage Instability ---
+        if voltage < 200.0:
+            alerts.append({
+                "sensor": sensor_num,
+                "type": "voltage_brownout",
+                "severity": "danger",
+                "message": f"Low Voltage Detected ({voltage:.1f}V). Potential Brownout.",
+                "waste_watts": 0,
+            })
+        elif voltage > 250.0:
+            alerts.append({
+                "sensor": sensor_num,
+                "type": "voltage_surge",
+                "severity": "danger",
+                "message": f"High Voltage Detected ({voltage:.1f}V). Potential Surge.",
+                "waste_watts": 0,
+            })
 
         if watts < 5.0:  # Skip if device is effectively off
             continue
@@ -92,7 +138,7 @@ def run_energy_audit(db: Session, device_id: str):
                         "sensor": sensor_num,
                         "type": "free_cooling_avail",
                         "severity": "info",
-                        "message": f"{label}: AC ON but it is cooler outside ({latest.outdoor_temp_c}°C). Open windows to save energy.",
+                        "message": f"{label}: AC ON but it is cooler outside ({latest.outdoor_temp_c}°C). Open windows.",
                         "waste_watts": watts,
                     })
 

@@ -181,7 +181,7 @@ async def post_reading(reading: ReadingCreate, db: Session = Depends(get_db)):
             # Async HTTP request with timeout
             async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.get(
-                    "https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=-0.1278&current=temperature_2m"
+                    "https://api.open-meteo.com/v1/forecast?latitude=6.7432&longitude=6.1385&current=temperature_2m"
                 )
                 if r.status_code == 200:
                     outdoor_temp = r.json()["current"]["temperature_2m"]
@@ -198,8 +198,10 @@ async def post_reading(reading: ReadingCreate, db: Session = Depends(get_db)):
         timestamp=datetime.utcnow(),
         sensor_1_amps=reading.sensor_1.get("current_amps", 0),
         sensor_1_watts=reading.sensor_1.get("watts", 0),
+        sensor_1_voltage=reading.sensor_1.get("voltage", 220.0),
         sensor_2_amps=reading.sensor_2.get("current_amps", 0),
         sensor_2_watts=reading.sensor_2.get("watts", 0),
+        sensor_2_voltage=reading.sensor_2.get("voltage", 220.0),
         temperature_c=reading.environment.get("temperature_c", 0),
         humidity_percent=reading.environment.get("humidity_percent", 0),
         light_raw=reading.environment.get("light_raw", 0),
