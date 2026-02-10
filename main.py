@@ -62,7 +62,33 @@ class BinStatus(BaseModel):
     last_update: Optional[str] = None
 
 
-# ... (startup event remains same)
+# ... (startup event)
+@app.on_event("startup")
+async def startup_event():
+    # Check for database migrations
+    try:
+        from sqlalchemy import text
+
+        with engine.connect() as conn:
+            # Check if outdoor_temp_c exists in energy_sensor_readings
+            result = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name='energy_sensor_readings' AND column_name='outdoor_temp_c'"
+                )
+            )
+            if not result.fetchone():
+                print("Migrating DB: Adding outdoor_temp_c column...")
+                conn.execute(
+                    text(
+                        "ALTER TABLE energy_sensor_readings ADD COLUMN outdoor_temp_c FLOAT"
+                    )
+                )
+                conn.commit()
+                print("Migration complete.")
+    except Exception as e:
+        print(f"Startup migration error: {e}")
+
 
 # ==================== COMMAND QUEUE ====================
 # Simple in-memory command queue: bin_id -> List[Command]
