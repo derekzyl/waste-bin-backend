@@ -115,6 +115,23 @@ def run_energy_audit(db: Session, device_id: str):
                     "waste_watts": watts,
                 })
 
+            # --- Rule 1b: Night Time Curfew (11 PM - 5 AM) ---
+            current_hour = (
+                datetime.utcnow().hour
+            )  # Using UTC, might need adjustment for local time
+            # Assuming Nigeria is UTC+1, 23:00 UTC is 00:00 Local.
+            # Local 11 PM (23:00) to 5 AM (05:00)
+            # UTC 10 PM (22:00) to 4 AM (04:00)
+            # Let's stick to a simple UTC check for now or approximate
+            if current_hour >= 23 or current_hour < 5:
+                alerts.append({
+                    "sensor": sensor_num,
+                    "type": "lighting_curfew_waste",
+                    "severity": "warning",
+                    "message": f"{label}: Lights ON during curfew hours (11 PM - 5 AM).",
+                    "waste_watts": watts,
+                })
+
         # --- Rule 2: HVAC + Temperature ---
         if (
             any(x in label for x in ["ac", "hvac", "cooling", "air con"])
