@@ -225,7 +225,7 @@ class MaterialClassifier:
                 pil_image = Image.fromarray(img_rgb)
 
                 response = self.client.models.generate_content(
-                    model="gemini-1.5-flash-latest",  # Correct format for Google GenAI SDK
+                    model="gemini-1.5-flash",  # Standard model name for GenAI SDK
                     contents=[
                         "Classify this waste material image into exactly one of these two categories: 'ORGANIC' or 'NON_ORGANIC'. "
                         'Return ONLY a JSON object with this format: {"material": "CATEGORY", "confidence": 0.95}',
