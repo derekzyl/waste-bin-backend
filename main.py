@@ -6,7 +6,7 @@ import numpy as np
 import uvicorn
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from health_monitoring.routes import router as health_router
 from image_classifier import MaterialClassifier
@@ -184,28 +184,47 @@ async def root():
 
 @app.post("/api/detect")
 async def detect_material(
-    file: UploadFile = File(...),
+    request: Request,
     db: Session = Depends(get_db),
     classifier: MaterialClassifier = Depends(get_classifier),
 ):
     """
-    Detect material type from uploaded image (In-Memory Processing).
+    Detect material type from uploaded image (RAW JPEG from ESP32-CAM).
+    Accepts raw image/jpeg directly in request body.
     """
     try:
         import cv2  # Lazy import
 
-        # Read file into memory
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
+        # Read raw image data from request body
+        image_data = await request.body()
+
+        print("\n📥 Detection request received:")
+        print(f"   Content-Type: {request.headers.get('content-type')}")
+        print(f"   Data size: {len(image_data)} bytes")
+
+        if not image_data or len(image_data) == 0:
+            raise HTTPException(status_code=400, detail="No image data received")
+
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
 
         # Decode image
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image file")
+            raise HTTPException(
+                status_code=400, detail="Invalid image - could not decode JPEG"
+            )
+
+        print(f"   ✅ Image decoded: {image.shape[1]}x{image.shape[0]} pixels")
 
         # Classify
         result = classifier.classify(image)
+
+        print(
+            f"   🤖 Detection: {result.get('material')} ({result.get('confidence') * 100:.1f}%)"
+        )
+        print(f"   Method: {result.get('method')}")
 
         # Log detection to database
         new_detection = DetectionLog(
