@@ -46,9 +46,18 @@ class MaterialClassifier:
         # Initialize Gemini
         self.api_key = os.getenv("GEMINI_API_KEY")
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+                print(
+                    f"✅ Gemini API initialized successfully (key: {self.api_key[:10]}...)"
+                )
+            except Exception as e:
+                print(f"❌ Gemini client initialization failed: {e}")
+                print("   Falling back to rule-based classification")
+                self.client = None
         else:
-            print("Warning: GEMINI_API_KEY not found. Gemini classification disabled.")
+            print("⚠️  Warning: GEMINI_API_KEY not found in environment.")
+            print("   Set GEMINI_API_KEY in .env file to enable AI classification")
             self.client = None
 
     def _initialize_default_classifier(self):
@@ -216,7 +225,7 @@ class MaterialClassifier:
                 pil_image = Image.fromarray(img_rgb)
 
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-1.5-flash",  # Using 1.5 for higher free tier limits
                     contents=[
                         "Classify this waste material image into exactly one of these two categories: 'ORGANIC' or 'NON_ORGANIC'. "
                         'Return ONLY a JSON object with this format: {"material": "CATEGORY", "confidence": 0.95}',

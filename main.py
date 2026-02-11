@@ -6,9 +6,9 @@ import numpy as np
 import uvicorn
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
-from health_monitoring.routes import router as health_router
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from health_monitoring.routes import router as health_router
 from image_classifier import MaterialClassifier
 from models import Bin, BinEvent, DetectionLog
 from pydantic import BaseModel
@@ -223,8 +223,29 @@ async def detect_material(
         return result
 
     except Exception as e:
-        print(f"Error in detection: {e}")
-        return {"material": "UNKNOWN", "confidence": 0.0, "error": str(e)}
+        import traceback
+
+        error_trace = traceback.format_exc()
+        print("❌ Error in detection endpoint:")
+        print(f"   Exception: {e}")
+        print(f"   Traceback:\n{error_trace}")
+
+        # Log the error details
+        try:
+            error_log = DetectionLog(
+                material="ERROR",
+                confidence=0.0,
+                method="error",
+                bin_id="unknown",
+                timestamp=datetime.now(),
+                image_path=None,
+            )
+            db.add(error_log)
+            db.commit()
+        except Exception:
+            pass
+
+        raise HTTPException(status_code=500, detail=f"Detection error: {str(e)}")
 
 
 @app.post("/api/bins/update")
