@@ -194,9 +194,17 @@ async def detect_material(
     """
     try:
         import cv2  # Lazy import
+        from starlette.requests import ClientDisconnect
 
         # Read raw image data from request body
-        image_data = await request.body()
+        try:
+            image_data = await request.body()
+        except ClientDisconnect:
+            # ESP32 disconnected during body read - retry won't help
+            raise HTTPException(
+                status_code=400,
+                detail="Client disconnected before image upload completed",
+            )
 
         print("\n📥 Detection request received:")
         print(f"   Content-Type: {request.headers.get('content-type')}")
