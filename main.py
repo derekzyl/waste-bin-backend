@@ -35,7 +35,7 @@ _classifier_instance = None
 def get_classifier():
     global _classifier_instance
     if _classifier_instance is None:
-        print("Lazy loading MaterialClassifier...")
+        print("Loading MaterialClassifier...")
         model_path = os.getenv("MODEL_PATH", "models/material_classifier.pkl")
         _classifier_instance = MaterialClassifier(model_path=model_path)
     return _classifier_instance
@@ -106,6 +106,13 @@ async def startup_event():
                     conn.commit()
     except Exception as e:
         print(f"Startup migration error: {e}")
+
+    # Warmup classifier to prevent ClientDisconnect on first request
+    try:
+        get_classifier()
+        print("Classifier warmup complete.")
+    except Exception as e:
+        print(f"Classifier warmup failed: {e}")
 
 
 # ==================== COMMAND QUEUE ====================
