@@ -243,3 +243,27 @@ def update_threshold(db: Session, device_id: str, threshold: schemas.ThresholdCr
     db.commit()
     db.refresh(db_threshold)
     return db_threshold
+
+
+def delete_device_vitals(db: Session, device_id: str) -> int:
+    """Delete all vitals for a device, returns count"""
+    count = (
+        db
+        .query(models.HealthVitalReading)
+        .filter(models.HealthVitalReading.device_id == device_id)
+        .delete()
+    )
+    db.commit()
+    return count
+
+
+def delete_device_alerts(db: Session, device_id: str) -> int:
+    """Delete all alerts for a device, returns count"""
+    count = (
+        db
+        .query(models.HealthAlert)
+        .filter(models.HealthAlert.device_id == device_id)
+        .delete()
+    )
+    db.commit()
+    return count
