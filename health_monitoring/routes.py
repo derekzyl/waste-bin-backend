@@ -178,3 +178,48 @@ def update_threshold(
 ):
     """Update or create alert threshold"""
     return services.update_threshold(db, device_id, threshold)
+
+
+# ==================== STATE CONTROL ENDPOINTS ====================
+
+# In-memory command queue for monitoring state changes
+from typing import Dict
+from typing import List as StateList
+
+pending_state_commands: Dict[str, StateList[str]] = {}
+
+
+class MonitoringStateCommand(schemas.BaseModel):
+    state: str  # 'idle', 'monitoring', or 'paused'
+
+
+@router.post("/devices/{device_id}/state")
+def set_monitoring_state(device_id: str, command: MonitoringStateCommand):
+    """
+    Queue a monitoring state change command.
+    Device polls this on next cloud sync to update state.
+    """
+    if command.state not in ["idle", "monitoring", "paused"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid state. Must be 'idle', 'monitoring', or 'paused'",
+        )
+
+    if device_id not in pending_state_commands:
+        pending_state_commands[device_id] = []
+
+    pending_state_commands[device_id].append(command.state)
+    return {"status": "queued", "state": command.state}
+
+
+@router.get("/devices/{device_id}/state/pending")
+def get_pending_state(device_id: str):
+    """
+    Get and clear pending state commands for device.
+    Device polls this endpoint.
+    """
+    if device_id in pending_state_commands and pending_state_commands[device_id]:
+        state = pending_state_commands[device_id][-1]  # Get most recent
+        pending_state_commands[device_id] = []  # Clear queue
+        return {"has_pending": True, "state": state}
+    return {"has_pending": False}

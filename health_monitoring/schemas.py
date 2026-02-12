@@ -56,10 +56,11 @@ class TemperatureData(BaseModel):
 
 
 class SystemData(BaseModel):
-    battery_percent: int = Field(..., ge=0, le=100)
-    battery_voltage: float
+    battery_percent: int = Field(default=100, ge=0, le=100)
+    battery_voltage: float = Field(default=3.7)
     wifi_rssi: int
     uptime_seconds: int
+    monitoring_state: Optional[str] = "idle"  # 'idle', 'monitoring', or 'paused'
 
 
 class VitalsData(BaseModel):
