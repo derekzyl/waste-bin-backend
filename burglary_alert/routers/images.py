@@ -1,19 +1,17 @@
-"""Images router."""
+"""Images router - Updated for Cloudinary storage."""
 
 from datetime import datetime
 from typing import Optional
 
 from database import get_db
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..models.image import Image, ImageSource
 from ..models.telegram_config import TelegramConfig
 from ..services.correlation import correlate_image_with_alert
-from ..services.telegram_bot import TelegramBot
 from ..utils.auth import verify_device_api_key
-from ..utils.storage import UPLOAD_DIR, generate_thumbnail, save_raw_image
 
 router = APIRouter(prefix="/image", tags=["Images"])
 
@@ -29,82 +27,99 @@ class ImageUploadResponse(BaseModel):
 
 
 @router.post("/image", response_model=ImageUploadResponse)
-async def receive_image(
+async def upload_image(
     request: Request,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_device_api_key),
 ):
     """
     Receive image directly from ESP32-CAM.
-
-    Accepts raw JPEG data in request body.
-    Performs correlation with alerts and forwards to Telegram.
-
-    Requires device API key authentication.
+    Uploads to Cloudinary and correlates with alerts.
     """
+    # Verify device API key
+    api_key = request.headers.get("X-API-Key")
+    if not verify_device_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
     try:
-        # Read raw image data
-        image_data = await request.body()
+        # Read image data
+        image_data = await file.read()
 
-        if not image_data or len(image_data) == 0:
-            raise HTTPException(status_code=400, detail="No image data received")
+        print(f"Received image: {len(image_data)} bytes")
 
-        print(f"📸 Image received: {len(image_data)} bytes")
-
-        # Save image
+        # Generate filename
         timestamp = datetime.utcnow()
-        filename, file_size = save_raw_image(image_data, timestamp)
+        filename = f"capture_{int(timestamp.timestamp())}.jpg"
 
-        # Generate thumbnail
-        thumbnail_filename = generate_thumbnail(filename)
+        # Upload to Cloudinary
+        from ..utils.storage import storage
+
+        image_url, thumbnail_url = storage.save_image(image_data, filename)
 
         # Create image record
-        new_image = Image(
+        image = Image(
             timestamp=timestamp,
-            image_path=filename,
-            thumbnail_path=thumbnail_filename,
-            file_size=file_size,
+            image_path=image_url,  # Cloudinary URL
+            thumbnail_path=thumbnail_url,  # Cloudinary thumbnail URL
+            file_size=len(image_data),
             received_from=ImageSource.ESP32_CAM,
         )
 
-        db.add(new_image)
+        db.add(image)
         db.commit()
-        db.refresh(new_image)
+        db.refresh(image)
 
-        print(f"✅ Image saved: ID={new_image.id}, File={filename}")
+        print(f"Image saved to Cloudinary with ID: {image.id}")
 
-        # Correlate with alert
-        correlated_alert = correlate_image_with_alert(new_image, db)
+        # Attempt correlation
+        alert = correlate_image_with_alert(db, image)
 
-        # Forward to Telegram
+        correlated = alert is not None
+        alert_id = alert.id if alert else None
+
+        # Forward to Telegram if configured
         telegram_sent = False
-        telegram_config = db.query(TelegramConfig).first()
+        telegram_config = (
+            db.query(TelegramConfig).filter(TelegramConfig.active == True).first()
+        )
 
-        if telegram_config and telegram_config.active:
-            bot = TelegramBot(telegram_config.bot_token, telegram_config.chat_id)
-            image_path = UPLOAD_DIR / filename
+        if telegram_config:
+            try:
+                from ..services.telegram_bot import send_image_to_telegram
 
-            caption = (
-                f"🚨 Intruder detected at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            if correlated_alert:
-                caption += f"\nConfidence: {correlated_alert.detection_confidence:.1%}"
-                pir = correlated_alert.pir_sensors_triggered
-                sensors = [k for k, v in pir.items() if v]
-                if sensors:
-                    caption += f"\nSensors: {', '.join(sensors)}"
+                caption = "🚨 Intruder Alert!\n"
+                caption += f"Time: {image.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
 
-            telegram_sent = bot.send_image(str(image_path), caption)
+                if correlated and alert:
+                    caption += f"Confidence: {alert.detection_confidence * 100:.0f}%\n"
+                    caption += "Sensors: "
+                    sensors = []
+                    if alert.pir_left:
+                        sensors.append("Left")
+                    if alert.pir_middle:
+                        sensors.append("Middle")
+                    if alert.pir_right:
+                        sensors.append("Right")
+                    caption += ", ".join(sensors)
+
+                telegram_sent = send_image_to_telegram(
+                    telegram_config.bot_token,
+                    telegram_config.chat_id,
+                    image_url,  # Send Cloudinary URL directly
+                    caption,
+                )
+            except Exception as e:
+                print(f"Telegram send error: {str(e)}")
 
         return ImageUploadResponse(
             status="success",
-            image_id=new_image.id,
-            correlated=correlated_alert is not None,
-            alert_id=correlated_alert.id if correlated_alert else None,
+            image_id=image.id,
+            correlated=correlated,
+            alert_id=alert_id,
             telegram_sent=telegram_sent,
         )
 
     except Exception as e:
+        print(f"Image upload error: {str(e)}")
         db.rollback()
-        print(f"❌ Error receiving image: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")

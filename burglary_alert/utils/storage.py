@@ -1,137 +1,160 @@
-"""File storage utilities for burglary alert system."""
+"""
+Cloudinary storage utility for image uploads.
+Images are automatically deleted after configured retention period (default: 24 hours).
+Stored in dedicated folder to avoid interference with other projects.
+"""
 
+import os
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
-from fastapi import UploadFile
-from PIL import Image
-
-UPLOAD_DIR = Path("backend/uploads/burglary")
-MAX_IMAGE_SIZE_MB = 5
-THUMBNAIL_SIZE = (200, 150)
+import cloudinary
+import cloudinary.uploader
 
 
-def ensure_upload_dir():
-    """Ensure upload directory exists."""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+class CloudinaryStorage:
+    def __init__(self):
+        """Initialize Cloudinary with environment variables."""
+        cloudinary.config(
+            cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+            api_key=os.getenv("CLOUDINARY_API_KEY"),
+            api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+            secure=True,
+        )
 
+        # Use dedicated folder for this project (isolated from other projects)
+        self.folder = os.getenv("CLOUDINARY_FOLDER", "burglary_alerts")
+        self.retention_hours = int(os.getenv("IMAGE_RETENTION_HOURS", "24"))
 
-def save_uploaded_image(
-    file: UploadFile, timestamp: Optional[datetime] = None
-) -> Tuple[str, int]:
-    """
-    Save uploaded image to filesystem.
+        print(
+            f"📁 Cloudinary initialized: folder='{self.folder}', retention={self.retention_hours}h"
+        )
 
-    Args:
-        file: Uploaded file from FastAPI
-        timestamp: Optional timestamp for filename
+    def save_image(self, image_data: bytes, filename: str) -> Tuple[str, str]:
+        """
+        Upload image to Cloudinary.
 
-    Returns:
-        Tuple of (filename, file_size_bytes)
-    """
-    ensure_upload_dir()
+        Args:
+            image_data: Raw JPEG image bytes
+            filename: Desired filename (will be sanitized)
 
-    if timestamp is None:
-        timestamp = datetime.utcnow()
+        Returns:
+            Tuple of (full_image_url, thumbnail_url)
+        """
+        try:
+            # Generate a unique public_id
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            public_id = f"{self.folder}/{timestamp}_{filename.replace('.jpg', '')}"
 
-    # Generate unique filename
-    filename = f"img_{timestamp.strftime('%Y%m%d_%H%M%S')}_{timestamp.microsecond}.jpg"
-    file_path = UPLOAD_DIR / filename
+            # Upload full-size image
+            result = cloudinary.uploader.upload(
+                image_data,
+                public_id=public_id,
+                folder=self.folder,
+                resource_type="image",
+                format="jpg",
+                # Add timestamp to metadata for cleanup
+                context=f"upload_time={datetime.utcnow().isoformat()}",
+            )
 
-    # Save file
-    file_size = 0
-    with open(file_path, "wb") as f:
-        content = file.file.read()
-        file_size = len(content)
-        f.write(content)
+            full_url = result["secure_url"]
 
-    return filename, file_size
+            # Generate thumbnail URL (200x150)
+            thumbnail_url = cloudinary.CloudinaryImage(result["public_id"]).build_url(
+                width=200,
+                height=150,
+                crop="fill",
+                gravity="center",
+                quality="auto",
+                fetch_format="auto",
+            )
 
+            print(f"📸 Image uploaded to Cloudinary: {public_id}")
+            print(f"🔗 Full URL: {full_url}")
 
-def save_raw_image(
-    image_data: bytes, timestamp: Optional[datetime] = None
-) -> Tuple[str, int]:
-    """
-    Save raw image bytes to filesystem (for ESP32-CAM direct upload).
+            return full_url, thumbnail_url
 
-    Args:
-        image_data: Raw JPEG bytes
-        timestamp: Optional timestamp for filename
+        except Exception as e:
+            print(f"❌ Cloudinary upload error: {str(e)}")
+            raise
 
-    Returns:
-        Tuple of (filename, file_size_bytes)
-    """
-    ensure_upload_dir()
+    def delete_image(self, image_url: str) -> bool:
+        """
+        Delete an image from Cloudinary.
 
-    if timestamp is None:
-        timestamp = datetime.utcnow()
+        Args:
+            image_url: Full Cloudinary URL
 
-    # Generate unique filename
-    filename = f"img_{timestamp.strftime('%Y%m%d_%H%M%S')}_{timestamp.microsecond}.jpg"
-    file_path = UPLOAD_DIR / filename
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            # Extract public_id from URL
+            # URL format: https://res.cloudinary.com/{cloud_name}/image/upload/{public_id}.jpg
+            parts = image_url.split("/")
+            if "upload" in parts:
+                upload_idx = parts.index("upload")
+                public_id_with_ext = "/".join(parts[upload_idx + 1 :])
+                public_id = public_id_with_ext.rsplit(".", 1)[0]  # Remove extension
 
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(image_data)
+                result = cloudinary.uploader.destroy(public_id)
 
-    return filename, len(image_data)
+                if result.get("result") == "ok":
+                    print(f"🗑️  Image deleted from Cloudinary: {public_id}")
+                    return True
+                else:
+                    print(f"⚠️  Cloudinary delete failed: {result}")
+                    return False
+            else:
+                print(f"❌ Invalid Cloudinary URL format: {image_url}")
+                return False
 
+        except Exception as e:
+            print(f"❌ Cloudinary delete error: {str(e)}")
+            return False
 
-def generate_thumbnail(
-    image_filename: str, size: Tuple[int, int] = THUMBNAIL_SIZE
-) -> Optional[str]:
-    """
-    Generate thumbnail for an image.
+    def cleanup_old_images(self, db_session):
+        """
+        Delete images older than retention period from both Cloudinary and database.
+        Called automatically by daily background task.
 
-    Args:
-        image_filename: Original image filename
-        size: Thumbnail size (width, height)
+        Args:
+            db_session: SQLAlchemy database session
+        """
+        from ..models.image import Image
 
-    Returns:
-        Thumbnail filename or None if failed
-    """
-    try:
-        image_path = UPLOAD_DIR / image_filename
-        if not image_path.exists():
-            return None
+        cutoff_time = datetime.utcnow() - timedelta(hours=self.retention_hours)
 
-        # Generate thumbnail filename
-        thumb_filename = f"thumb_{image_filename}"
-        thumb_path = UPLOAD_DIR / thumb_filename
+        print(
+            f"🔍 Checking for images older than {cutoff_time} ({self.retention_hours}h ago)"
+        )
 
-        # Create thumbnail
-        with Image.open(image_path) as img:
-            img.thumbnail(size, Image.Resampling.LANCZOS)
-            img.save(thumb_path, "JPEG", quality=85)
+        # Find old images
+        old_images = db_session.query(Image).filter(Image.timestamp < cutoff_time).all()
 
-        return thumb_filename
-    except Exception as e:
-        print(f"Error generating thumbnail: {e}")
-        return None
+        if not old_images:
+            print("✅ No old images to clean up")
+            return 0
 
+        deleted_count = 0
 
-def cleanup_old_files(days: int = 30):
-    """
-    Delete files older than specified days.
-
-    Args:
-        days: Number of days to keep files
-    """
-    ensure_upload_dir()
-
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
-    deleted_count = 0
-
-    for file_path in UPLOAD_DIR.iterdir():
-        if file_path.is_file():
-            file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-            if file_mtime < cutoff_date:
-                try:
-                    file_path.unlink()
+        for image in old_images:
+            try:
+                # Delete from Cloudinary
+                if self.delete_image(image.image_path):
+                    # Delete from database
+                    db_session.delete(image)
                     deleted_count += 1
-                except Exception as e:
-                    print(f"Error deleting {file_path}: {e}")
+            except Exception as e:
+                print(f"❌ Error deleting image {image.id}: {str(e)}")
+                continue
 
-    print(f"Cleaned up {deleted_count} old files")
-    return deleted_count
+        if deleted_count > 0:
+            db_session.commit()
+            print(f"✅ Cleaned up {deleted_count} old images from {self.folder}/")
+
+        return deleted_count
+
+
+# Global storage instance
+storage = CloudinaryStorage()

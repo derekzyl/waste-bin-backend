@@ -1,0 +1,2 @@
+# Additional dependency for Cloudinary storage
+cloudinary>=1.36.0
