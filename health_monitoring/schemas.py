@@ -148,3 +148,10 @@ class ThresholdResponse(BaseModel):
 
 class RestingHRCalibration(BaseModel):
     resting_hr: int = Field(..., ge=40, le=100)
+
+
+# ==================== STATE CONTROL SCHEMAS ====================
+
+
+class StateCommand(BaseModel):
+    state: str  # 'idle', 'monitoring', or 'paused'
