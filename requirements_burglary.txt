@@ -1,5 +1,0 @@
-# Additional dependencies for burglary alert system
-python-jose[cryptography]>=3.3.0  # JWT token handling
-python-multipart>=0.0.5  # File upload support
-Pillow>=10.0.0  # Image processing
-requests>=2.31.0  # Telegram API calls

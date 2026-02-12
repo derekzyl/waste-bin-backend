@@ -43,38 +43,7 @@ app.add_middleware(
 
 
 # Daily cleanup task for burglary alert images
-@app.on_event("startup")
-async def startup_event():
-    """Initialize background tasks on startup."""
-    import asyncio
-
-    async def daily_cleanup():
-        """Run image cleanup every 24 hours."""
-        while True:
-            try:
-                await asyncio.sleep(86400)  # 24 hours in seconds
-
-                print("🧹 Running daily image cleanup...")
-
-                from burglary_alert.utils.storage import storage
-                from database import get_db
-
-                db = next(get_db())
-                try:
-                    deleted_count = storage.cleanup_old_images(db)
-                    print(f"✅ Daily cleanup complete: {deleted_count} images deleted")
-                except Exception as e:
-                    print(f"❌ Cleanup error: {str(e)}")
-                finally:
-                    db.close()
-
-            except Exception as e:
-                print(f"Background task error: {str(e)}")
-                await asyncio.sleep(3600)  # Retry in 1 hour on error
-
-    # Start cleanup task in background
-    asyncio.create_task(daily_cleanup())
-    print("✅ Daily cleanup task started")
+# Daily cleanup task is now initialized in the main startup_event function below
 
 
 # Lazy-load material classifier
