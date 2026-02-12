@@ -6,9 +6,9 @@ import numpy as np
 import uvicorn
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
-from health_monitoring.routes import router as health_router
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from health_monitoring.routes import router as health_router
 from image_classifier import MaterialClassifier
 from models import Bin, BinEvent, DetectionLog
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ _classifier_instance = None
 def get_classifier():
     global _classifier_instance
     if _classifier_instance is None:
-        print("Lazy loading MaterialClassifier...")
+        print("Loading MaterialClassifier...")
         model_path = os.getenv("MODEL_PATH", "models/material_classifier.pkl")
         _classifier_instance = MaterialClassifier(model_path=model_path)
     return _classifier_instance
@@ -106,6 +106,13 @@ async def startup_event():
                     conn.commit()
     except Exception as e:
         print(f"Startup migration error: {e}")
+
+    # Warmup classifier to prevent ClientDisconnect on first request
+    try:
+        get_classifier()
+        print("Classifier warmup complete.")
+    except Exception as e:
+        print(f"Classifier warmup failed: {e}")
 
 
 # ==================== COMMAND QUEUE ====================
@@ -184,28 +191,55 @@ async def root():
 
 @app.post("/api/detect")
 async def detect_material(
-    file: UploadFile = File(...),
+    request: Request,
     db: Session = Depends(get_db),
     classifier: MaterialClassifier = Depends(get_classifier),
 ):
     """
-    Detect material type from uploaded image (In-Memory Processing).
+    Detect material type from uploaded image (RAW JPEG from ESP32-CAM).
+    Accepts raw image/jpeg directly in request body.
     """
     try:
         import cv2  # Lazy import
+        from starlette.requests import ClientDisconnect
 
-        # Read file into memory
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
+        # Read raw image data from request body
+        try:
+            image_data = await request.body()
+        except ClientDisconnect:
+            # ESP32 disconnected during body read - retry won't help
+            raise HTTPException(
+                status_code=400,
+                detail="Client disconnected before image upload completed",
+            )
+
+        print("\n📥 Detection request received:")
+        print(f"   Content-Type: {request.headers.get('content-type')}")
+        print(f"   Data size: {len(image_data)} bytes")
+
+        if not image_data or len(image_data) == 0:
+            raise HTTPException(status_code=400, detail="No image data received")
+
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
 
         # Decode image
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image file")
+            raise HTTPException(
+                status_code=400, detail="Invalid image - could not decode JPEG"
+            )
+
+        print(f"   ✅ Image decoded: {image.shape[1]}x{image.shape[0]} pixels")
 
         # Classify
         result = classifier.classify(image)
+
+        print(
+            f"   🤖 Detection: {result.get('material')} ({result.get('confidence') * 100:.1f}%)"
+        )
+        print(f"   Method: {result.get('method')}")
 
         # Log detection to database
         new_detection = DetectionLog(
@@ -223,8 +257,29 @@ async def detect_material(
         return result
 
     except Exception as e:
-        print(f"Error in detection: {e}")
-        return {"material": "UNKNOWN", "confidence": 0.0, "error": str(e)}
+        import traceback
+
+        error_trace = traceback.format_exc()
+        print("❌ Error in detection endpoint:")
+        print(f"   Exception: {e}")
+        print(f"   Traceback:\n{error_trace}")
+
+        # Log the error details
+        try:
+            error_log = DetectionLog(
+                material="ERROR",
+                confidence=0.0,
+                method="error",
+                bin_id="unknown",
+                timestamp=datetime.now(),
+                image_path=None,
+            )
+            db.add(error_log)
+            db.commit()
+        except Exception:
+            pass
+
+        raise HTTPException(status_code=500, detail=f"Detection error: {str(e)}")
 
 
 @app.post("/api/bins/update")

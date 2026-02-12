@@ -45,10 +45,58 @@ class MaterialClassifier:
 
         # Initialize Gemini
         self.api_key = os.getenv("GEMINI_API_KEY")
+        self.model_name = "gemini-1.5-flash"  # Default fallback
+
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+                print(
+                    f"✅ Gemini Client initialized (key: {self.api_key[:5]}...{self.api_key[-5:]})"
+                )
+
+                # Dynamically find a valid model
+                try:
+                    print("   Searching for available Gemini models...")
+                    available_models = list(self.client.models.list())
+
+                    found_model = None
+                    # Prioritize flash models
+                    for m in available_models:
+                        if "flash" in m.name.lower() and "gemini" in m.name.lower():
+                            found_model = m.name
+                            break
+
+                    # If no flash, take any gemini model
+                    if not found_model:
+                        for m in available_models:
+                            if (
+                                "gemini" in m.name.lower()
+                                and "vision" in m.name.lower()
+                            ):  # Prefer vision capable
+                                found_model = m.name
+                                break
+
+                    if found_model:
+                        self.model_name = found_model
+                        print(f"   ✨ Selected Gemini model: {self.model_name}")
+                    else:
+                        print(
+                            f"   ⚠️ Could not find specific 'flash' model, using default: {self.model_name}"
+                        )
+
+                except Exception as list_err:
+                    print(
+                        f"   ⚠️ Could not list models (API Key might be limited/invalid): {list_err}"
+                    )
+                    print(f"   Using default model name: {self.model_name}")
+
+            except Exception as e:
+                print(f"❌ Gemini client initialization failed: {e}")
+                print("   Falling back to rule-based classification")
+                self.client = None
         else:
-            print("Warning: GEMINI_API_KEY not found. Gemini classification disabled.")
+            print("⚠️  Warning: GEMINI_API_KEY not found in environment.")
+            print("   Set GEMINI_API_KEY in .env file to enable AI classification")
             self.client = None
 
     def _initialize_default_classifier(self):
@@ -216,7 +264,7 @@ class MaterialClassifier:
                 pil_image = Image.fromarray(img_rgb)
 
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model=self.model_name,
                     contents=[
                         "Classify this waste material image into exactly one of these two categories: 'ORGANIC' or 'NON_ORGANIC'. "
                         'Return ONLY a JSON object with this format: {"material": "CATEGORY", "confidence": 0.95}',
