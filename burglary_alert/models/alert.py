@@ -33,7 +33,10 @@ class Alert(Base):
     correlated = Column(Boolean, default=False, nullable=False)
 
     # Relationship
-    image = relationship("Image", back_populates="alert", foreign_keys=[image_id])
+    # Relationship
+    image = relationship(
+        "Image", back_populates="alert", uselist=False, foreign_keys="Image.alert_id"
+    )
 
     def to_dict(self):
         """Convert model to dictionary."""

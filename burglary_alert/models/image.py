@@ -30,6 +30,7 @@ class Image(Base):
     )
 
     # Relationship
+    # Relationship
     alert = relationship("Alert", back_populates="image", foreign_keys=[alert_id])
 
     def to_dict(self):
