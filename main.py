@@ -4,9 +4,22 @@ from typing import Optional
 
 import numpy as np
 import uvicorn
+
+# Import burglary alert models to ensure tables are created
+from burglary_alert.models import Alert as BurglaryAlert  # noqa: F401
+from burglary_alert.models import Image as BurglaryImage  # noqa: F401
+from burglary_alert.models import SystemConfig, TelegramConfig  # noqa: F401
+
+# Burglary Alert System imports
+from burglary_alert.routers import (
+    alerts_router,
+    auth_router,
+    images_router,
+    telegram_router,
+)
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from health_monitoring.routes import router as health_router
 from image_classifier import MaterialClassifier
@@ -27,6 +40,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Daily cleanup task for burglary alert images
+# Daily cleanup task is now initialized in the main startup_event function below
+
 
 # Lazy-load material classifier
 _classifier_instance = None
@@ -166,12 +184,21 @@ async def health_check():
 app.include_router(energy_router)
 app.include_router(health_router)
 
+# Burglary Alert System
+burglary_router = APIRouter(prefix="/api/v1/burglary")
+burglary_router.include_router(auth_router)
+burglary_router.include_router(alerts_router)
+burglary_router.include_router(images_router)
+burglary_router.include_router(telegram_router)
+
+app.include_router(burglary_router)
+
 
 @app.get("/")
 async def root():
     return {
         "message": "Student IoT Multi-Project Backend",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "database": "PostgreSQL",
         "projects": {
             "waste_management": {
@@ -185,6 +212,16 @@ async def root():
             },
             "energy_audit": {"prefix": "/energy", "docs": "/energy/docs"},
             "health_monitoring": {"prefix": "/health", "docs": "/health/docs"},
+            "burglary_alert": {
+                "prefix": "/api/v1/burglary",
+                "endpoints": {
+                    "login": "/api/v1/burglary/auth/login (POST)",
+                    "alert": "/api/v1/burglary/alert/alert (POST)",
+                    "feeds": "/api/v1/burglary/alert/feeds (GET)",
+                    "image_upload": "/api/v1/burglary/image/image (POST)",
+                    "telegram_config": "/api/v1/burglary/telegram/config (POST/GET)",
+                },
+            },
         },
     }
 

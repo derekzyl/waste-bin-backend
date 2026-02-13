@@ -155,11 +155,16 @@ class ThresholdConfig(BaseModel):
 # ==================== CALIBRATION SCHEMAS ====================
 
 
-class RestingHRCalibration(BaseModel):
+class CalibrationRequest(BaseModel):
     resting_hr: int = Field(..., ge=40, le=100)
 
 
-CalibrationRequest = RestingHRCalibration
+# Alias for backward compatibility if needed, or just use CalibrationRequest
+RestingHRCalibration = CalibrationRequest
+
+
+class ThresholdConfig(BaseModel):
+    thresholds: List[ThresholdResponse]
 
 
 # ==================== STATE CONTROL SCHEMAS ====================
