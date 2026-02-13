@@ -123,7 +123,7 @@ def update_last_seen(db: Session, device_id: str):
         db.commit()
 
 
-def get_latest_reading(
+def get_latest_vitals(
     db: Session, device_id: str
 ) -> Optional[models.HealthVitalReading]:
     """Get most recent vital reading"""
@@ -136,51 +136,43 @@ def get_latest_reading(
     )
 
 
-def get_readings_range(
+def get_vitals_history(
     db: Session,
     device_id: str,
-    start_date: datetime,
-    end_date: datetime,
     limit: int = 100,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> List[models.HealthVitalReading]:
-    """Get readings within date range"""
-    return (
-        db
-        .query(models.HealthVitalReading)
-        .filter(
-            models.HealthVitalReading.device_id == device_id,
-            models.HealthVitalReading.timestamp >= start_date,
-            models.HealthVitalReading.timestamp <= end_date,
-        )
-        .order_by(models.HealthVitalReading.timestamp.desc())
-        .limit(limit)
-        .all()
+    """Get readings within date range or limit"""
+    query = db.query(models.HealthVitalReading).filter(
+        models.HealthVitalReading.device_id == device_id
     )
 
+    if start_date:
+        query = query.filter(models.HealthVitalReading.timestamp >= start_date)
+    if end_date:
+        query = query.filter(models.HealthVitalReading.timestamp <= end_date)
 
-def get_device_alerts(db: Session, device_id: str) -> List[models.HealthAlert]:
-    """Get all alerts for device"""
-    return (
-        db
-        .query(models.HealthAlert)
-        .filter(models.HealthAlert.device_id == device_id)
-        .order_by(models.HealthAlert.timestamp.desc())
-        .all()
+    return query.order_by(models.HealthVitalReading.timestamp.desc()).limit(limit).all()
+
+
+def get_alerts(
+    db: Session, device_id: str, limit: int = 50, severity: Optional[str] = None
+) -> List[models.HealthAlert]:
+    """Get alerts for device with optional filtering"""
+    query = db.query(models.HealthAlert).filter(
+        models.HealthAlert.device_id == device_id
     )
+
+    if severity:
+        query = query.filter(models.HealthAlert.severity == severity)
+
+    return query.order_by(models.HealthAlert.timestamp.desc()).limit(limit).all()
 
 
 def get_critical_alerts(db: Session, device_id: str) -> List[models.HealthAlert]:
     """Get only critical alerts"""
-    return (
-        db
-        .query(models.HealthAlert)
-        .filter(
-            models.HealthAlert.device_id == device_id,
-            models.HealthAlert.severity == "CRITICAL",
-        )
-        .order_by(models.HealthAlert.timestamp.desc())
-        .all()
-    )
+    return get_alerts(db, device_id, limit=20, severity="CRITICAL")
 
 
 def acknowledge_alert(db: Session, alert_id: int):
@@ -193,17 +185,17 @@ def acknowledge_alert(db: Session, alert_id: int):
         alert.acknowledged_at = datetime.utcnow()
         db.commit()
         return {"status": "success"}
-    return {"status": "not_found"}
+    return False
 
 
-def set_resting_hr(db: Session, device_id: str, resting_hr: int):
+def calibrate_device(db: Session, device_id: str, resting_hr: int):
     """Set resting heart rate for temperature estimation calibration"""
     device = get_device(db, device_id)
     if device:
         device.resting_hr = resting_hr
         db.commit()
-        return {"status": "success", "resting_hr": resting_hr}
-    return {"status": "device_not_found"}
+        return True
+    return False
 
 
 def get_thresholds(db: Session, device_id: str) -> List[models.HealthThreshold]:
@@ -216,8 +208,55 @@ def get_thresholds(db: Session, device_id: str) -> List[models.HealthThreshold]:
     )
 
 
+def set_thresholds(db: Session, device_id: str, thresholds: schemas.ThresholdConfig):
+    """Update all alert thresholds for device"""
+    device = get_device(db, device_id)
+    if not device:
+        return False
+
+    # Helper to update or create
+    def _upsert_threshold(t_type, t_value, enabled=True):
+        db_thresh = (
+            db
+            .query(models.HealthThreshold)
+            .filter(
+                models.HealthThreshold.device_id == device_id,
+                models.HealthThreshold.threshold_type == t_type,
+            )
+            .first()
+        )
+        if db_thresh:
+            db_thresh.threshold_value = t_value
+            db_thresh.enabled = enabled
+        else:
+            db_thresh = models.HealthThreshold(
+                device_id=device_id,
+                threshold_type=t_type,
+                threshold_value=t_value,
+                enabled=enabled,
+            )
+            db.add(db_thresh)
+
+    # Update individual thresholds from the config object
+    if thresholds.hr_high is not None:
+        _upsert_threshold("HR_HIGH", thresholds.hr_high)
+    if thresholds.hr_low is not None:
+        _upsert_threshold("HR_LOW", thresholds.hr_low)
+    if thresholds.spo2_low is not None:
+        _upsert_threshold("SPO2_LOW", thresholds.spo2_low)
+    if thresholds.spo2_critical is not None:
+        _upsert_threshold("SPO2_CRITICAL", thresholds.spo2_critical)
+    if thresholds.temp_high is not None:
+        _upsert_threshold("TEMP_HIGH", thresholds.temp_high)
+    if thresholds.temp_low is not None:
+        _upsert_threshold("TEMP_LOW", thresholds.temp_low)
+
+    db.commit()
+    return True
+
+
 def update_threshold(db: Session, device_id: str, threshold: schemas.ThresholdCreate):
-    """Update or create threshold"""
+    """Update or create a single threshold"""
     db_threshold = (
         db
         .query(models.HealthThreshold)
@@ -243,6 +282,14 @@ def update_threshold(db: Session, device_id: str, threshold: schemas.ThresholdCr
     db.commit()
     db.refresh(db_threshold)
     return db_threshold
+
+
+def get_summary_stats(db: Session, device_id: str, period: str = "daily"):
+    """Get summary statistics for different time periods"""
+    # Import here to avoid circular dependency if correlation_engine imports services
+    from .correlation_engine import get_summary_stats as engine_stats
+
+    return engine_stats(db, device_id, period)
 
 
 def delete_device_vitals(db: Session, device_id: str) -> int:
