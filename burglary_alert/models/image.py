@@ -37,10 +37,8 @@ class Image(Base):
         return {
             "id": self.id,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-            "image_url": f"/uploads/burglary/{self.image_path}",
-            "thumbnail_url": f"/uploads/burglary/{self.thumbnail_path}"
-            if self.thumbnail_path
-            else None,
+            "image_url": self.image_path,
+            "thumbnail_url": self.thumbnail_path,
             "file_size": self.file_size,
             "alert_id": self.alert_id,
             "received_from": self.received_from.value if self.received_from else None,

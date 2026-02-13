@@ -72,16 +72,14 @@ async def upload_image(
         print(f"Image saved to Cloudinary with ID: {image.id}")
 
         # Attempt correlation
-        alert = correlate_image_with_alert(db, image)
+        alert = correlate_image_with_alert(image, db)
 
         correlated = alert is not None
         alert_id = alert.id if alert else None
 
         # Forward to Telegram if configured
         telegram_sent = False
-        telegram_config = (
-            db.query(TelegramConfig).filter(TelegramConfig.active == True).first()
-        )
+        telegram_config = db.query(TelegramConfig).filter(TelegramConfig.active).first()
 
         if telegram_config:
             try:
