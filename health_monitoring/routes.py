@@ -153,8 +153,8 @@ def calibrate_device(
     db: Session = Depends(get_db),
 ):
     """Set resting HR for temperature estimation calibration"""
-    success = services.calibrate_device(db, device_id, calibration.resting_hr)
-    if not success:
+    result = services.set_resting_hr(db, device_id, calibration.resting_hr)
+    if result["status"] == "device_not_found":
         raise HTTPException(status_code=404, detail="Device not found")
     return {"status": "calibrated", "resting_hr": calibration.resting_hr}
 
@@ -162,7 +162,8 @@ def calibrate_device(
 @router.get("/devices/{device_id}/thresholds", response_model=schemas.ThresholdConfig)
 def get_thresholds(device_id: str, db: Session = Depends(get_db)):
     """Get alert thresholds for device"""
-    return services.get_thresholds(db, device_id)
+    thresholds = services.get_thresholds(db, device_id)
+    return {"thresholds": thresholds}
 
 
 @router.post("/devices/{device_id}/thresholds")
@@ -172,9 +173,21 @@ def set_thresholds(
     db: Session = Depends(get_db),
 ):
     """Update alert thresholds for device"""
-    success = services.set_thresholds(db, device_id, thresholds)
-    if not success:
+    # Check if device exists
+    device = services.get_device(db, device_id)
+    if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+
+    for threshold_item in thresholds.thresholds:
+        # Convert response model back to create/update model if needed or pass directly
+        # services.update_threshold expects ThresholdCreate
+        update_data = schemas.ThresholdCreate(
+            threshold_type=threshold_item.threshold_type,
+            threshold_value=threshold_item.threshold_value,
+            enabled=threshold_item.enabled,
+        )
+        services.update_threshold(db, device_id, update_data)
+
     return {"status": "updated"}
 
 
