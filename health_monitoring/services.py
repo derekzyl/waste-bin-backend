@@ -81,16 +81,18 @@ def get_device(db: Session, device_id: str) -> Optional[models.HealthDevice]:
     )
 
 
-def store_vitals(
+def create_vital_reading(
     db: Session, vitals: schemas.VitalReadingCreate
-) -> models.HealthVitalReading:
-    """Store vital signs reading"""
-    # Ensure device exists
+) -> schemas.VitalReadingResponse:
+    """Store reading, run analysis, and return summary"""
+    # 1. Ensure device exists and update last seen
     device = get_device(db, vitals.device_id)
     if not device:
-        # Auto-create device if not exists
         create_device(db, schemas.DeviceCreate(device_id=vitals.device_id))
 
+    update_last_seen(db, vitals.device_id)
+
+    # 2. Store the reading
     reading = models.HealthVitalReading(
         device_id=vitals.device_id,
         timestamp=datetime.fromtimestamp(vitals.timestamp),
@@ -112,7 +114,31 @@ def store_vitals(
     db.add(reading)
     db.commit()
     db.refresh(reading)
-    return reading
+
+    # 3. specific imports to avoid circular dependency
+    from . import correlation_engine
+
+    # 4. Analyze for alerts
+    generated_alerts = correlation_engine.analyze_vitals(db, vitals)
+
+    critical_alerts = [
+        {
+            "id": a.id,
+            "type": a.alert_type,
+            "message": a.message,
+            "timestamp": a.timestamp,
+        }
+        for a in generated_alerts
+        if a.severity == "CRITICAL"
+    ]
+
+    # 5. Return summary response
+    return {
+        "status": "success",
+        "reading_id": reading.id,
+        "alerts_generated": len(generated_alerts),
+        "critical_alerts": critical_alerts,
+    }
 
 
 def update_last_seen(db: Session, device_id: str):
