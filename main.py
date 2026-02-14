@@ -291,6 +291,35 @@ async def detect_material(
         db.add(new_detection)
         db.commit()
 
+        # ==================== CLOUD COMMAND FALLBACK ====================
+        # Automatically queue OPEN command for the detected bin
+        # This allows the Main ESP32 to poll and open the bin even if ESP-NOW fails
+        try:
+            target_bin_id = None
+            if result.get("material") == "ORGANIC":
+                target_bin_id = "0x001"
+            elif result.get("material") in ["NON_ORGANIC", "INORGANIC"]:
+                target_bin_id = "0x002"
+
+            if target_bin_id:
+                print(f"   ☁️ Queueing fallback OPEN command for {target_bin_id}")
+
+                # Create command
+                cmd = Command(
+                    command="OPEN",
+                    params={"source": "cloud_fallback"},
+                    timestamp=int(datetime.now().timestamp() * 1000),
+                )
+
+                # Add to memory queue (same as pending_commands global)
+                if target_bin_id not in pending_commands:
+                    pending_commands[target_bin_id] = []
+                pending_commands[target_bin_id].append(cmd.dict())
+
+        except Exception as queue_err:
+            print(f"   ⚠️ Failed to queue fallback command: {queue_err}")
+        # ================================================================
+
         return result
 
     except Exception as e:
