@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 from typing import Optional
@@ -24,7 +25,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from health_monitoring.routes import router as health_router
 from image_classifier import MaterialClassifier
-from models import Bin, BinEvent, DetectionLog
+from models import Bin, BinEvent, CommandQueue, DetectionLog
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -134,9 +135,7 @@ async def startup_event():
         print(f"Classifier warmup failed: {e}")
 
 
-# ==================== COMMAND QUEUE ====================
-# Simple in-memory command queue: bin_id -> List[Command]
-pending_commands = {}
+# ==================== COMMAND QUEUE (DATABASE) ====================
 
 
 class Command(BaseModel):
@@ -146,28 +145,51 @@ class Command(BaseModel):
 
 
 @app.post("/api/bins/{bin_id}/command")
-async def queue_command(bin_id: str, cmd: Command):
+async def queue_command(bin_id: str, cmd: Command, db: Session = Depends(get_db)):
     """
     Queue a command for the bin to execute (e.g., OPEN, CLOSE).
     """
-    if bin_id not in pending_commands:
-        pending_commands[bin_id] = []
+    import json
 
-    cmd.timestamp = int(datetime.now().timestamp() * 1000)
-    pending_commands[bin_id].append(cmd.dict())
-    return {"status": "queued", "command": cmd}
+    new_cmd = CommandQueue(
+        bin_id=bin_id,
+        command=cmd.command,
+        params=json.dumps(cmd.params) if cmd.params else "{}",
+    )
+    db.add(new_cmd)
+    db.commit()
+
+    print(f"✅ Queued DB command for {bin_id}: {cmd.command}")
+    return {"status": "queued", "command": cmd.dict()}
 
 
 @app.get("/api/bins/{bin_id}/commands")
-async def get_commands(bin_id: str):
+async def get_commands(bin_id: str, db: Session = Depends(get_db)):
     """
     Get pending commands for a bin (Poll & Pop).
     """
-    if bin_id in pending_commands and pending_commands[bin_id]:
-        cmds = pending_commands[bin_id]
-        pending_commands[bin_id] = []  # Clear queue after fetching
-        return {"commands": cmds}
-    return {"commands": []}
+    # Fetch pending commands
+    pending_cmds = (
+        db
+        .query(CommandQueue)
+        .filter(CommandQueue.bin_id == bin_id, CommandQueue.status == "pending")
+        .all()
+    )
+
+    if not pending_cmds:
+        return {"commands": []}
+
+    # Convert to response format
+    response_cmds = [cmd.to_dict() for cmd in pending_cmds]
+
+    # Mark as executed (or delete)
+    # For now, we delete to keep it simple like a queue
+    for cmd in pending_cmds:
+        db.delete(cmd)
+    db.commit()
+
+    print(f"🚀 Sent {len(response_cmds)} commands to {bin_id}")
+    return {"commands": response_cmds}
 
 
 # ==================== API ENDPOINTS ====================
@@ -292,6 +314,32 @@ async def detect_material(
 
         db.add(new_detection)
         db.commit()
+
+        # ==================== CLOUD COMMAND FALLBACK ====================
+        # Automatically queue OPEN command for the detected bin
+        # This allows the Main ESP32 to poll and open the bin even if ESP-NOW fails
+        try:
+            target_bin_id = None
+            if result.get("material") == "ORGANIC":
+                target_bin_id = "0x001"
+            elif result.get("material") in ["NON_ORGANIC", "INORGANIC"]:
+                target_bin_id = "0x002"
+
+            if target_bin_id:
+                print(f"   ☁️ Queueing fallback OPEN command for {target_bin_id}")
+
+                # Persist to DB
+                fallback_cmd = CommandQueue(
+                    bin_id=target_bin_id,
+                    command="OPEN",
+                    params=json.dumps({"source": "cloud_fallback"}),
+                )
+                db.add(fallback_cmd)
+                db.commit()
+
+        except Exception as queue_err:
+            print(f"   ⚠️ Failed to queue fallback command: {queue_err}")
+        # ================================================================
 
         return result
 

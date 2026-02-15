@@ -56,7 +56,7 @@ def receive_vitals(vitals: schemas.VitalReadingCreate, db: Session = Depends(get
     return services.create_vital_reading(db, vitals)
 
 
-@router.get("/vitals/{device_id}/latest", response_model=schemas.VitalReadingResponse)
+@router.get("/vitals/{device_id}/latest", response_model=schemas.VitalReadingDetailed)
 def get_latest_vitals(device_id: str, db: Session = Depends(get_db)):
     """Get most recent vital signs for a device"""
     vitals = services.get_latest_vitals(db, device_id)
@@ -66,7 +66,7 @@ def get_latest_vitals(device_id: str, db: Session = Depends(get_db)):
 
 
 @router.get(
-    "/vitals/{device_id}/history", response_model=List[schemas.VitalReadingResponse]
+    "/vitals/{device_id}/history", response_model=List[schemas.VitalReadingDetailed]
 )
 def get_vitals_history(
     device_id: str,

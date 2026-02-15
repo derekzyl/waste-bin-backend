@@ -85,3 +85,29 @@ class BinEvent(Base):
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "metadata": self.event_metadata,
         }
+
+
+class CommandQueue(Base):
+    """Queue for bin commands (OPEN, CLOSE) to ensure persistence"""
+
+    __tablename__ = "command_queue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bin_id = Column(String, nullable=False, index=True)
+    command = Column(String, nullable=False)  # 'OPEN', 'CLOSE'
+    params = Column(Text, nullable=True)  # JSON string
+    status = Column(String, default="pending")  # 'pending', 'executed'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self):
+        import json
+
+        return {
+            "id": self.id,
+            "command": self.command,
+            "params": json.loads(self.params) if self.params else {},
+            "timestamp": int(self.created_at.timestamp() * 1000)
+            if self.created_at
+            else 0,
+        }

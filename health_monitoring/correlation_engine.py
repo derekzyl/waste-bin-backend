@@ -213,9 +213,11 @@ def create_alert(
     return alert
 
 
-def analyze_health_patterns(db: Session, device_id: str, hours: int = 24) -> Dict:
+def calculate_correlations(
+    db: Session, device_id: str, hours_delta: timedelta = timedelta(hours=24)
+) -> Dict:
     """Multi-variate health analysis (HR + SpO2 + Temp)"""
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.utcnow() - hours_delta
 
     readings = (
         db
@@ -289,11 +291,50 @@ def analyze_health_patterns(db: Session, device_id: str, hours: int = 24) -> Dic
     }
 
     return {
-        "analysis_period_hours": hours,
+        "analysis_period_hours": hours_delta.total_seconds() / 3600,
         "total_readings": len(readings),
         "patterns": patterns,
         "summary": summary,
     }
+
+
+def get_trends(
+    db: Session, device_id: str, days_delta: timedelta = timedelta(days=7)
+) -> Dict:
+    """Get trends in vital signs over time"""
+    start_time = datetime.utcnow() - days_delta
+
+    readings = (
+        db
+        .query(models.HealthVitalReading)
+        .filter(
+            models.HealthVitalReading.device_id == device_id,
+            models.HealthVitalReading.timestamp >= start_time,
+        )
+        .order_by(models.HealthVitalReading.timestamp.asc())
+        .all()
+    )
+
+    if not readings:
+        return {"message": "No data available for trends"}
+
+    # Group readings by day for simple trend analysis
+    trends = {"dates": [], "heart_rate": [], "spo2": [], "temperature": []}
+
+    # Helper to format date
+    def ensure_valid(val):
+        return val if val is not None else 0
+
+    # This is a simple implementation returning all points.
+    # For production, we should aggregate by hour/day.
+    # Currently returning raw data points for the graph.
+    for r in readings:
+        trends["dates"].append(r.timestamp.isoformat())
+        trends["heart_rate"].append(ensure_valid(r.heart_rate))
+        trends["spo2"].append(ensure_valid(r.spo2))
+        trends["temperature"].append(ensure_valid(r.temperature))
+
+    return trends
 
 
 def get_summary_stats(db: Session, device_id: str, period: str = "daily") -> Dict:

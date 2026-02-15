@@ -143,6 +143,15 @@ class ThresholdResponse(BaseModel):
         from_attributes = True
 
 
+class ThresholdConfig(BaseModel):
+    hr_high: Optional[float] = Field(None, description="Upper heart rate limit")
+    hr_low: Optional[float] = Field(None, description="Lower heart rate limit")
+    spo2_low: Optional[float] = Field(None, description="Low SpO2 warning limit")
+    spo2_critical: Optional[float] = Field(None, description="Critical SpO2 limit")
+    temp_high: Optional[float] = Field(None, description="High temperature limit")
+    temp_low: Optional[float] = Field(None, description="Low temperature limit")
+
+
 # ==================== CALIBRATION SCHEMAS ====================
 
 
