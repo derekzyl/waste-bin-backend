@@ -52,11 +52,20 @@ async def save_telegram_config(
     bot_token = (config.bot_token or "").strip()
     chat_id = (config.chat_id or "").strip()
 
+    # Don't treat masked token (from GET /config) as a real token - old app or second device may send it and overwrite
+    def is_masked_token(s: str) -> bool:
+        if not s or len(s) < 6:
+            return False
+        return s.startswith("*") and s.count("*") >= 6
+
+    if is_masked_token(bot_token):
+        bot_token = ""
+
     # Get or create config (singleton)
     telegram_config = db.query(TelegramConfig).first()
 
     if telegram_config:
-        # Update existing: empty token means "keep current" (app sends empty when showing masked token)
+        # Update existing: empty or masked token means "keep current"
         if bot_token:
             telegram_config.bot_token = bot_token
         if chat_id:
