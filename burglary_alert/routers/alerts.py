@@ -1,6 +1,6 @@
 """Alerts router."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from database import get_db
@@ -48,6 +48,16 @@ class SystemStatusResponse(BaseModel):
     last_alert: Optional[str]
 
 
+def _format_utc_iso(dt: Optional[datetime]) -> str:
+    """Format datetime as ISO 8601 with Z (UTC) for API responses."""
+    if not dt:
+        return ""
+    # Ensure we have a UTC-aware moment, then output with Z
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
 @router.post("/alert")
 async def receive_alert(
     alert_data: AlertCreate,
@@ -60,8 +70,10 @@ async def receive_alert(
     Requires device API key authentication.
     """
     try:
-        # Convert timestamp from milliseconds to datetime
-        timestamp = datetime.fromtimestamp(alert_data.timestamp / 1000.0)
+        # Interpret epoch as UTC and store as naive UTC for DB compatibility
+        timestamp = datetime.fromtimestamp(
+            alert_data.timestamp / 1000.0, tz=timezone.utc
+        ).replace(tzinfo=None)
 
         # Create PIR sensors JSON
         pir_sensors = {
@@ -145,7 +157,7 @@ async def get_alerts(
     return [
         AlertResponse(
             id=alert.id,
-            timestamp=alert.timestamp.isoformat() if alert.timestamp else "",
+            timestamp=_format_utc_iso(alert.timestamp),
             alert_type=alert.alert_type,
             detection_confidence=alert.detection_confidence,
             pir_sensors_triggered=alert.pir_sensors_triggered,
@@ -176,7 +188,7 @@ async def get_alert_by_id(
 
     return AlertResponse(
         id=alert.id,
-        timestamp=alert.timestamp.isoformat() if alert.timestamp else "",
+        timestamp=_format_utc_iso(alert.timestamp),
         alert_type=alert.alert_type,
         detection_confidence=alert.detection_confidence,
         pir_sensors_triggered=alert.pir_sensors_triggered,
@@ -206,7 +218,7 @@ async def get_system_status(
 
     # Get last alert
     last_alert = db.query(Alert).order_by(Alert.timestamp.desc()).first()
-    last_alert_time = last_alert.timestamp.isoformat() if last_alert else None
+    last_alert_time = _format_utc_iso(last_alert.timestamp) if last_alert else None
 
     return SystemStatusResponse(
         status="healthy",

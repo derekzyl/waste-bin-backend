@@ -27,8 +27,8 @@ def correlate_image_with_alert(image: Image, db: Session) -> Optional[Alert]:
     Returns:
         Matched Alert object or None if no match found
     """
-    # Find uncorrelated alerts within last 10 seconds
-    time_window_start = image.timestamp - timedelta(seconds=10)
+    # Find uncorrelated alerts near this image (alert usually before trigger; image may arrive a few sec later)
+    time_window_start = image.timestamp - timedelta(seconds=15)
     time_window_end = image.timestamp + timedelta(seconds=CORRELATION_WINDOW_SECONDS)
 
     uncorrelated_alerts = (
