@@ -14,6 +14,7 @@ from burglary_alert.models import SystemConfig, TelegramConfig  # noqa: F401
 from burglary_alert.routers import (
     alerts_router,
     auth_router,
+    devices_router,
     images_router,
     telegram_router,
 )
@@ -190,6 +191,7 @@ burglary_router.include_router(auth_router)
 burglary_router.include_router(alerts_router)
 burglary_router.include_router(images_router)
 burglary_router.include_router(telegram_router)
+burglary_router.include_router(devices_router)
 
 app.include_router(burglary_router)
 

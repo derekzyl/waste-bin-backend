@@ -87,16 +87,38 @@ async def receive_alert(
             f"📥 Alert received: ID={new_alert.id}, Confidence={alert_data.detection_confidence:.2f}"
         )
 
-        return {
-            "status": "success",
-            "alert_id": new_alert.id,
-            "message": "Alert recorded successfully",
-        }
-
     except Exception as e:
         db.rollback()
         print(f"❌ Error receiving alert: {e}")
         raise HTTPException(status_code=500, detail=f"Error recording alert: {str(e)}")
+
+    # Send Telegram notification if configured (same flow as backend)
+    try:
+        from ..models.telegram_config import TelegramConfig
+        from ..services.telegram_bot import send_message_to_telegram
+
+        telegram_config = db.query(TelegramConfig).filter(TelegramConfig.active).first()
+        if telegram_config:
+            timestamp_str = timestamp.strftime("%H:%M:%S")
+            msg = (
+                f"🚨 <b>INTRUDER ALERT!</b>\n"
+                f"🕒 Time: {timestamp_str}\n"
+                f"📊 Confidence: {alert_data.detection_confidence * 100:.0f}%\n"
+                f"📡 Status: {alert_data.network_status}\n\n"
+                f"<i>Image may follow if available...</i>"
+            )
+            send_message_to_telegram(
+                telegram_config.bot_token, telegram_config.chat_id, msg
+            )
+            print("✓ Telegram alert sent")
+    except Exception as e:
+        print(f"⚠️ Failed to send Telegram alert: {e}")
+
+    return {
+        "status": "success",
+        "alert_id": new_alert.id,
+        "message": "Alert recorded successfully",
+    }
 
 
 @router.get("/feeds", response_model=List[AlertResponse])
@@ -130,9 +152,7 @@ async def get_alerts(
             network_status=alert.network_status,
             image_id=alert.image_id,
             correlated=alert.correlated,
-            image_url=f"/uploads/burglary/{alert.image.image_path}"
-            if alert.image
-            else None,
+            image_url=alert.image.image_path if alert.image else None,
         )
         for alert in alerts
     ]
@@ -163,9 +183,7 @@ async def get_alert_by_id(
         network_status=alert.network_status,
         image_id=alert.image_id,
         correlated=alert.correlated,
-        image_url=f"/uploads/burglary/{alert.image.image_path}"
-        if alert.image
-        else None,
+        image_url=alert.image.image_path if alert.image else None,
     )
 
 

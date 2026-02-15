@@ -27,7 +27,7 @@ class TelegramBot:
         Send image to Telegram chat.
 
         Args:
-            image_path: Path to image file
+            image_path: Path to image file or URL
             caption: Image caption
 
         Returns:
@@ -40,23 +40,33 @@ class TelegramBot:
         try:
             url = f"{self.base_url}/sendPhoto"
 
-            with open(image_path, "rb") as photo:
-                files = {"photo": photo}
+            # Check if image_path is a URL (starts with http) or local file
+            if image_path.startswith("http://") or image_path.startswith("https://"):
+                # Send photo from URL
                 data = {
                     "chat_id": self.chat_id,
+                    "photo": image_path,
                     "caption": caption,
                 }
+                response = requests.post(url, data=data, timeout=10)
+            else:
+                # Send photo from local file
+                with open(image_path, "rb") as photo:
+                    files = {"photo": photo}
+                    data = {
+                        "chat_id": self.chat_id,
+                        "caption": caption,
+                    }
+                    response = requests.post(url, files=files, data=data, timeout=10)
 
-                response = requests.post(url, files=files, data=data, timeout=10)
-
-                if response.status_code == 200:
-                    print("✅ Telegram image sent successfully")
-                    return True
-                else:
-                    print(
-                        f"❌ Telegram API error: {response.status_code} - {response.text}"
-                    )
-                    return False
+            if response.status_code == 200:
+                print("✅ Telegram image sent successfully")
+                return True
+            else:
+                print(
+                    f"❌ Telegram API error: {response.status_code} - {response.text}"
+                )
+                return False
 
         except Exception as e:
             print(f"❌ Error sending Telegram image: {e}")
@@ -126,3 +136,50 @@ class TelegramBot:
         except Exception as e:
             print(f"❌ Error testing Telegram connection: {e}")
             return False
+
+
+# ============================================================================
+# Standalone Helper Functions
+# ============================================================================
+
+
+def send_image_to_telegram(
+    bot_token: str,
+    chat_id: str,
+    image_path: str,
+    caption: str
+) -> bool:
+    """
+    Send image to Telegram chat (standalone function).
+
+    Args:
+        bot_token: Telegram bot token
+        chat_id: Telegram chat ID
+        image_path: Path to image file or URL
+        caption: Image caption
+
+    Returns:
+        True if successful, False otherwise
+    """
+    bot = TelegramBot(bot_token, chat_id)
+    return bot.send_image(image_path, caption)
+
+
+def send_message_to_telegram(
+    bot_token: str,
+    chat_id: str,
+    message: str
+) -> bool:
+    """
+    Send message to Telegram chat (standalone function).
+
+    Args:
+        bot_token: Telegram bot token
+        chat_id: Telegram chat ID
+        message: Text message
+
+    Returns:
+        True if successful, False otherwise
+    """
+    bot = TelegramBot(bot_token, chat_id)
+    return bot.send_message(message)
