@@ -48,19 +48,39 @@ async def save_telegram_config(
 
     Requires JWT authentication.
     """
+    # Strip whitespace/newlines - Telegram 404 often caused by pasted token with trailing newline or space
+    bot_token = (config.bot_token or "").strip()
+    chat_id = (config.chat_id or "").strip()
+
+    # Don't treat masked token (from GET /config) as a real token - old app or second device may send it and overwrite
+    def is_masked_token(s: str) -> bool:
+        if not s or len(s) < 6:
+            return False
+        return s.startswith("*") and s.count("*") >= 6
+
+    if is_masked_token(bot_token):
+        bot_token = ""
+
     # Get or create config (singleton)
     telegram_config = db.query(TelegramConfig).first()
 
     if telegram_config:
-        # Update existing
-        telegram_config.chat_id = config.chat_id
-        telegram_config.bot_token = config.bot_token
+        # Update existing: empty or masked token means "keep current"
+        if bot_token:
+            telegram_config.bot_token = bot_token
+        if chat_id:
+            telegram_config.chat_id = chat_id
         telegram_config.active = config.active
     else:
-        # Create new
+        # Create new: both required
+        if not bot_token or not chat_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Bot token and chat ID are required for first-time setup",
+            )
         telegram_config = TelegramConfig(
-            chat_id=config.chat_id,
-            bot_token=config.bot_token,
+            chat_id=chat_id,
+            bot_token=bot_token,
             active=config.active,
         )
         db.add(telegram_config)
@@ -121,7 +141,8 @@ async def test_telegram_connection(
     bot = TelegramBot(telegram_config.bot_token, telegram_config.chat_id)
 
     # Test connection
-    if bot.test_connection():
+    ok, err_msg = bot.test_connection()
+    if ok:
         # Send test message
         test_message = "✅ Burglary Alert System - Telegram connection successful!"
         if bot.send_message(test_message):
@@ -135,4 +156,7 @@ async def test_telegram_connection(
                 message="Bot connection OK but message send failed",
             )
     else:
-        raise HTTPException(status_code=400, detail="Telegram connection failed")
+        raise HTTPException(
+            status_code=400,
+            detail=err_msg or "Telegram connection failed",
+        )

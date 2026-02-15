@@ -15,8 +15,13 @@ from burglary_alert.models import SystemConfig, TelegramConfig  # noqa: F401
 from burglary_alert.routers import (
     alerts_router,
     auth_router,
+    devices_router,
     images_router,
     telegram_router,
+)
+from burglary_alert.routers.alerts import (
+    SystemStatusResponse,
+    get_system_status,
 )
 from database import Base, engine, get_db
 from energy_api.routes import router as energy_router
@@ -241,6 +246,9 @@ burglary_router.include_router(auth_router)
 burglary_router.include_router(alerts_router)
 burglary_router.include_router(images_router)
 burglary_router.include_router(telegram_router)
+burglary_router.include_router(devices_router)
+# Alias so app can call GET /api/v1/burglary/status (same as /api/v1/burglary/alert/status)
+burglary_router.get("/status", response_model=SystemStatusResponse)(get_system_status)
 
 app.include_router(burglary_router)
 

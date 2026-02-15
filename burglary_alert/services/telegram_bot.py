@@ -1,6 +1,6 @@
 """Telegram Bot service for sending alerts."""
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 
@@ -13,13 +13,13 @@ class TelegramBot:
         Initialize Telegram bot.
 
         Args:
-            bot_token: Telegram bot token
-            chat_id: Telegram chat ID
+            bot_token: Telegram bot token (from @BotFather, e.g. 123456789:AAHdqTcvCH1vGWJ...)
+            chat_id: Telegram chat ID (numeric, or negative for groups)
         """
-        self.bot_token = bot_token
-        self.chat_id = chat_id
+        self.bot_token = (bot_token or "").strip() or None
+        self.chat_id = (chat_id or "").strip() or None
         self.base_url = (
-            f"https://api.telegram.org/bot{bot_token}" if bot_token else None
+            f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else None
         )
 
     def send_image(self, image_path: str, caption: str) -> bool:
@@ -27,7 +27,7 @@ class TelegramBot:
         Send image to Telegram chat.
 
         Args:
-            image_path: Path to image file
+            image_path: Path to image file or URL
             caption: Image caption
 
         Returns:
@@ -40,23 +40,38 @@ class TelegramBot:
         try:
             url = f"{self.base_url}/sendPhoto"
 
-            with open(image_path, "rb") as photo:
-                files = {"photo": photo}
+            # Check if image_path is a URL (starts with http) or local file
+            if image_path.startswith("http://") or image_path.startswith("https://"):
+                # Send photo from URL
                 data = {
                     "chat_id": self.chat_id,
+                    "photo": image_path,
                     "caption": caption,
                 }
+                response = requests.post(url, data=data, timeout=10)
+            else:
+                # Send photo from local file
+                with open(image_path, "rb") as photo:
+                    files = {"photo": photo}
+                    data = {
+                        "chat_id": self.chat_id,
+                        "caption": caption,
+                    }
+                    response = requests.post(url, files=files, data=data, timeout=10)
 
-                response = requests.post(url, files=files, data=data, timeout=10)
-
-                if response.status_code == 200:
-                    print("✅ Telegram image sent successfully")
-                    return True
-                else:
-                    print(
-                        f"❌ Telegram API error: {response.status_code} - {response.text}"
-                    )
-                    return False
+            if response.status_code == 200:
+                print("✅ Telegram image sent successfully")
+                return True
+            elif response.status_code == 404:
+                print(
+                    "❌ Telegram 404: Bot not found. Check bot token and chat_id."
+                )
+                return False
+            else:
+                print(
+                    f"❌ Telegram API error: {response.status_code} - {response.text}"
+                )
+                return False
 
         except Exception as e:
             print(f"❌ Error sending Telegram image: {e}")
@@ -89,6 +104,11 @@ class TelegramBot:
             if response.status_code == 200:
                 print("✅ Telegram message sent successfully")
                 return True
+            elif response.status_code == 404:
+                print(
+                    "❌ Telegram 404: Bot not found. Check bot token (from @BotFather) and chat_id (send /start to bot, then get from getUpdates)."
+                )
+                return False
             else:
                 print(
                     f"❌ Telegram API error: {response.status_code} - {response.text}"
@@ -99,15 +119,15 @@ class TelegramBot:
             print(f"❌ Error sending Telegram message: {e}")
             return False
 
-    def test_connection(self) -> bool:
+    def test_connection(self) -> Tuple[bool, str]:
         """
         Test Telegram bot connection.
 
         Returns:
-            True if connection successful, False otherwise
+            (True, "") if OK, (False, "error message") otherwise
         """
         if not self.bot_token:
-            return False
+            return False, "Bot token not set"
 
         try:
             url = f"{self.base_url}/getMe"
@@ -118,11 +138,64 @@ class TelegramBot:
                 print(
                     f"✅ Telegram bot connected: {bot_info.get('result', {}).get('username')}"
                 )
-                return True
+                return True, ""
+            elif response.status_code == 404:
+                msg = "Invalid bot token. Get a new token from @BotFather and update Telegram config."
+                print(f"❌ Telegram 404: {msg}")
+                return False, msg
             else:
-                print(f"❌ Telegram bot connection failed: {response.status_code}")
-                return False
+                msg = f"Telegram API returned {response.status_code}"
+                print(f"❌ Telegram bot connection failed: {msg}")
+                return False, msg
 
         except Exception as e:
+            msg = str(e)
             print(f"❌ Error testing Telegram connection: {e}")
-            return False
+            return False, msg
+
+
+# ============================================================================
+# Standalone Helper Functions
+# ============================================================================
+
+
+def send_image_to_telegram(
+    bot_token: str,
+    chat_id: str,
+    image_path: str,
+    caption: str
+) -> bool:
+    """
+    Send image to Telegram chat (standalone function).
+
+    Args:
+        bot_token: Telegram bot token
+        chat_id: Telegram chat ID
+        image_path: Path to image file or URL
+        caption: Image caption
+
+    Returns:
+        True if successful, False otherwise
+    """
+    bot = TelegramBot(bot_token, chat_id)
+    return bot.send_image(image_path, caption)
+
+
+def send_message_to_telegram(
+    bot_token: str,
+    chat_id: str,
+    message: str
+) -> bool:
+    """
+    Send message to Telegram chat (standalone function).
+
+    Args:
+        bot_token: Telegram bot token
+        chat_id: Telegram chat ID
+        message: Text message
+
+    Returns:
+        True if successful, False otherwise
+    """
+    bot = TelegramBot(bot_token, chat_id)
+    return bot.send_message(message)

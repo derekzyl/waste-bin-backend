@@ -1,6 +1,6 @@
 """Alerts router."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from database import get_db
@@ -48,6 +48,16 @@ class SystemStatusResponse(BaseModel):
     last_alert: Optional[str]
 
 
+def _format_utc_iso(dt: Optional[datetime]) -> str:
+    """Format datetime as ISO 8601 with Z (UTC) for API responses."""
+    if not dt:
+        return ""
+    # Ensure we have a UTC-aware moment, then output with Z
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
 @router.post("/alert")
 async def receive_alert(
     alert_data: AlertCreate,
@@ -60,8 +70,10 @@ async def receive_alert(
     Requires device API key authentication.
     """
     try:
-        # Convert timestamp from milliseconds to datetime
-        timestamp = datetime.fromtimestamp(alert_data.timestamp / 1000.0)
+        # Interpret epoch as UTC and store as naive UTC for DB compatibility
+        timestamp = datetime.fromtimestamp(
+            alert_data.timestamp / 1000.0, tz=timezone.utc
+        ).replace(tzinfo=None)
 
         # Create PIR sensors JSON
         pir_sensors = {
@@ -87,16 +99,39 @@ async def receive_alert(
             f"📥 Alert received: ID={new_alert.id}, Confidence={alert_data.detection_confidence:.2f}"
         )
 
-        return {
-            "status": "success",
-            "alert_id": new_alert.id,
-            "message": "Alert recorded successfully",
-        }
-
     except Exception as e:
         db.rollback()
         print(f"❌ Error receiving alert: {e}")
         raise HTTPException(status_code=500, detail=f"Error recording alert: {str(e)}")
+
+    # Send Telegram notification if configured (same flow as backend)
+    try:
+        from ..models.telegram_config import TelegramConfig
+        from ..services.telegram_bot import send_message_to_telegram
+
+        telegram_config = db.query(TelegramConfig).filter(TelegramConfig.active).first()
+        if telegram_config:
+            timestamp_str = timestamp.strftime("%H:%M:%S")
+            msg = (
+                f"🚨 <b>INTRUDER ALERT!</b>\n"
+                f"🕒 Time: {timestamp_str}\n"
+                f"📊 Confidence: {alert_data.detection_confidence * 100:.0f}%\n"
+                f"📡 Status: {alert_data.network_status}\n\n"
+                f"<i>Image may follow if available...</i>"
+            )
+            sent = send_message_to_telegram(
+                telegram_config.bot_token, telegram_config.chat_id, msg
+            )
+            if sent:
+                print("✓ Telegram alert sent")
+    except Exception as e:
+        print(f"⚠️ Telegram alert error (alert still saved): {e}")
+
+    return {
+        "status": "success",
+        "alert_id": new_alert.id,
+        "message": "Alert recorded successfully",
+    }
 
 
 @router.get("/feeds", response_model=List[AlertResponse])
@@ -123,16 +158,14 @@ async def get_alerts(
     return [
         AlertResponse(
             id=alert.id,
-            timestamp=alert.timestamp.isoformat() if alert.timestamp else "",
+            timestamp=_format_utc_iso(alert.timestamp),
             alert_type=alert.alert_type,
             detection_confidence=alert.detection_confidence,
             pir_sensors_triggered=alert.pir_sensors_triggered,
             network_status=alert.network_status,
             image_id=alert.image_id,
             correlated=alert.correlated,
-            image_url=f"/uploads/burglary/{alert.image.image_path}"
-            if alert.image
-            else None,
+            image_url=alert.image.image_path if alert.image else None,
         )
         for alert in alerts
     ]
@@ -156,16 +189,14 @@ async def get_alert_by_id(
 
     return AlertResponse(
         id=alert.id,
-        timestamp=alert.timestamp.isoformat() if alert.timestamp else "",
+        timestamp=_format_utc_iso(alert.timestamp),
         alert_type=alert.alert_type,
         detection_confidence=alert.detection_confidence,
         pir_sensors_triggered=alert.pir_sensors_triggered,
         network_status=alert.network_status,
         image_id=alert.image_id,
         correlated=alert.correlated,
-        image_url=f"/uploads/burglary/{alert.image.image_path}"
-        if alert.image
-        else None,
+        image_url=alert.image.image_path if alert.image else None,
     )
 
 
@@ -188,7 +219,7 @@ async def get_system_status(
 
     # Get last alert
     last_alert = db.query(Alert).order_by(Alert.timestamp.desc()).first()
-    last_alert_time = last_alert.timestamp.isoformat() if last_alert else None
+    last_alert_time = _format_utc_iso(last_alert.timestamp) if last_alert else None
 
     return SystemStatusResponse(
         status="healthy",
