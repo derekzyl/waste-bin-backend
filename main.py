@@ -191,6 +191,35 @@ async def get_commands(bin_id: str, db: Session = Depends(get_db)):
     return {"commands": response_cmds}
 
 
+@app.get("/api/bins/commands")
+async def get_all_commands(db: Session = Depends(get_db)):
+    """
+    Get pending commands for BOTH bins in one request (low latency for device).
+    Returns list of { "bin_id", "command", "params", "timestamp" }; each is removed after return.
+    """
+    pending_cmds = (
+        db.query(CommandQueue)
+        .filter(
+            CommandQueue.bin_id.in_(["0x001", "0x002"]),
+            CommandQueue.status == "pending",
+        )
+        .order_by(CommandQueue.created_at)
+        .all()
+    )
+    if not pending_cmds:
+        return {"commands": []}
+    response_cmds = []
+    for cmd in pending_cmds:
+        d = cmd.to_dict()
+        d["bin_id"] = cmd.bin_id
+        response_cmds.append(d)
+    for cmd in pending_cmds:
+        db.delete(cmd)
+    db.commit()
+    print(f"🚀 Sent {len(response_cmds)} commands (combined)")
+    return {"commands": response_cmds}
+
+
 # ==================== API ENDPOINTS ====================
 
 
@@ -330,7 +359,11 @@ async def detect_material(
                 fallback_cmd = CommandQueue(
                     bin_id=target_bin_id,
                     command="OPEN",
-                    params=json.dumps({"source": "cloud_fallback"}),
+                    params=json.dumps({
+                        "source": "cloud_fallback",
+                        "material": result.get("material"),
+                        "confidence": result.get("confidence"),
+                    }),
                 )
                 db.add(fallback_cmd)
                 db.commit()
