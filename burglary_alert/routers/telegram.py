@@ -121,7 +121,8 @@ async def test_telegram_connection(
     bot = TelegramBot(telegram_config.bot_token, telegram_config.chat_id)
 
     # Test connection
-    if bot.test_connection():
+    ok, err_msg = bot.test_connection()
+    if ok:
         # Send test message
         test_message = "✅ Burglary Alert System - Telegram connection successful!"
         if bot.send_message(test_message):
@@ -135,4 +136,7 @@ async def test_telegram_connection(
                 message="Bot connection OK but message send failed",
             )
     else:
-        raise HTTPException(status_code=400, detail="Telegram connection failed")
+        raise HTTPException(
+            status_code=400,
+            detail=err_msg or "Telegram connection failed",
+        )

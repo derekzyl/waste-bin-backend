@@ -119,12 +119,13 @@ async def receive_alert(
                 f"📡 Status: {alert_data.network_status}\n\n"
                 f"<i>Image may follow if available...</i>"
             )
-            send_message_to_telegram(
+            sent = send_message_to_telegram(
                 telegram_config.bot_token, telegram_config.chat_id, msg
             )
-            print("✓ Telegram alert sent")
+            if sent:
+                print("✓ Telegram alert sent")
     except Exception as e:
-        print(f"⚠️ Failed to send Telegram alert: {e}")
+        print(f"⚠️ Telegram alert error (alert still saved): {e}")
 
     return {
         "status": "success",
