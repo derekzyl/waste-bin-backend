@@ -48,19 +48,30 @@ async def save_telegram_config(
 
     Requires JWT authentication.
     """
+    # Strip whitespace/newlines - Telegram 404 often caused by pasted token with trailing newline or space
+    bot_token = (config.bot_token or "").strip()
+    chat_id = (config.chat_id or "").strip()
+
     # Get or create config (singleton)
     telegram_config = db.query(TelegramConfig).first()
 
     if telegram_config:
-        # Update existing
-        telegram_config.chat_id = config.chat_id
-        telegram_config.bot_token = config.bot_token
+        # Update existing: empty token means "keep current" (app sends empty when showing masked token)
+        if bot_token:
+            telegram_config.bot_token = bot_token
+        if chat_id:
+            telegram_config.chat_id = chat_id
         telegram_config.active = config.active
     else:
-        # Create new
+        # Create new: both required
+        if not bot_token or not chat_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Bot token and chat ID are required for first-time setup",
+            )
         telegram_config = TelegramConfig(
-            chat_id=config.chat_id,
-            bot_token=config.bot_token,
+            chat_id=chat_id,
+            bot_token=bot_token,
             active=config.active,
         )
         db.add(telegram_config)

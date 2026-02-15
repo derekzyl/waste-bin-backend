@@ -13,13 +13,13 @@ class TelegramBot:
         Initialize Telegram bot.
 
         Args:
-            bot_token: Telegram bot token
-            chat_id: Telegram chat ID
+            bot_token: Telegram bot token (from @BotFather, e.g. 123456789:AAHdqTcvCH1vGWJ...)
+            chat_id: Telegram chat ID (numeric, or negative for groups)
         """
-        self.bot_token = bot_token
-        self.chat_id = chat_id
+        self.bot_token = (bot_token or "").strip() or None
+        self.chat_id = (chat_id or "").strip() or None
         self.base_url = (
-            f"https://api.telegram.org/bot{bot_token}" if bot_token else None
+            f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else None
         )
 
     def send_image(self, image_path: str, caption: str) -> bool:
