@@ -70,10 +70,17 @@ async def receive_alert(
     Requires device API key authentication.
     """
     try:
-        # Interpret epoch as UTC and store as naive UTC for DB compatibility
-        timestamp = datetime.fromtimestamp(
-            alert_data.timestamp / 1000.0, tz=timezone.utc
-        ).replace(tzinfo=None)
+        # Use device timestamp only if it looks valid (ESP32 may send 1970-era if NTP not synced)
+        ONE_DAY_MS = 86400 * 1000
+        if alert_data.timestamp >= ONE_DAY_MS:
+            timestamp = datetime.fromtimestamp(
+                alert_data.timestamp / 1000.0, tz=timezone.utc
+            ).replace(tzinfo=None)
+        else:
+            timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+            print(
+                f"⚠️ Device timestamp too small ({alert_data.timestamp} ms), using server time"
+            )
 
         # Create PIR sensors JSON
         pir_sensors = {
