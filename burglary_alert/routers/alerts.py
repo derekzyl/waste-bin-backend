@@ -48,6 +48,15 @@ class SystemStatusResponse(BaseModel):
     last_alert: Optional[str]
 
 
+class PaginatedAlertsResponse(BaseModel):
+    """Paginated alert feed response."""
+
+    data: List[AlertResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 def _format_utc_iso(dt: Optional[datetime]) -> str:
     """Format datetime as ISO 8601 with Z (UTC) for API responses."""
     if not dt:
@@ -70,10 +79,8 @@ async def receive_alert(
     Requires device API key authentication.
     """
     try:
-        # Interpret epoch as UTC and store as naive UTC for DB compatibility
-        timestamp = datetime.fromtimestamp(
-            alert_data.timestamp / 1000.0, tz=timezone.utc
-        ).replace(tzinfo=None)
+        # Always use server time for alert timestamp (consistent, no device clock issues)
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Create PIR sensors JSON
         pir_sensors = {
@@ -134,9 +141,9 @@ async def receive_alert(
     }
 
 
-@router.get("/feeds", response_model=List[AlertResponse])
+@router.get("/feeds", response_model=PaginatedAlertsResponse)
 async def get_alerts(
-    limit: int = 50,
+    limit: int = 20,
     offset: int = 0,
     db: Session = Depends(get_db),
     _: dict = Depends(get_current_user),
@@ -146,6 +153,7 @@ async def get_alerts(
 
     Requires JWT authentication.
     """
+    total = db.query(Alert).count()
     alerts = (
         db
         .query(Alert)
@@ -155,7 +163,7 @@ async def get_alerts(
         .all()
     )
 
-    return [
+    data = [
         AlertResponse(
             id=alert.id,
             timestamp=_format_utc_iso(alert.timestamp),
@@ -169,6 +177,7 @@ async def get_alerts(
         )
         for alert in alerts
     ]
+    return PaginatedAlertsResponse(data=data, total=total, limit=limit, offset=offset)
 
 
 @router.get("/feeds/{alert_id}", response_model=AlertResponse)
