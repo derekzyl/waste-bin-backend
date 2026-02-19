@@ -16,6 +16,17 @@ from ..utils.auth import verify_device_api_key
 router = APIRouter(prefix="/image", tags=["Images"])
 
 
+@router.get("/image")
+async def image_upload_get():
+    """Image upload is POST only. GET returns 405 with Allow header."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=405,
+        content={"detail": "Method not allowed. Use POST to upload images."},
+        headers={"Allow": "POST"},
+    )
+
+
 class ImageUploadResponse(BaseModel):
     """Image upload response model."""
 
