@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 import uvicorn
@@ -167,40 +167,15 @@ async def queue_command(bin_id: str, cmd: Command, db: Session = Depends(get_db)
     return {"status": "queued", "command": cmd.dict()}
 
 
-@app.get("/api/bins/{bin_id}/commands")
-async def get_commands(bin_id: str, db: Session = Depends(get_db)):
-    """
-    Get pending commands for a bin (Poll & Pop).
-    """
-    # Fetch pending commands
-    pending_cmds = (
-        db
-        .query(CommandQueue)
-        .filter(CommandQueue.bin_id == bin_id, CommandQueue.status == "pending")
-        .all()
-    )
-
-    if not pending_cmds:
-        return {"commands": []}
-
-    # Convert to response format
-    response_cmds = [cmd.to_dict() for cmd in pending_cmds]
-
-    # Mark as executed (or delete)
-    # For now, we delete to keep it simple like a queue
-    for cmd in pending_cmds:
-        db.delete(cmd)
-    db.commit()
-
-    print(f"🚀 Sent {len(response_cmds)} commands to {bin_id}")
-    return {"commands": response_cmds}
-
-
+# IMPORTANT: Define literal path BEFORE param path so GET /api/bins/commands
+# is not matched by /api/bins/{bin_id}/commands with bin_id="commands"
 @app.get("/api/bins/commands")
 async def get_all_commands(db: Session = Depends(get_db)):
     """
-    Get pending commands for BOTH bins in one request (low latency for device).
-    Returns list of { "bin_id", "command", "params", "timestamp" }; each is removed after return.
+    Get pending commands for BOTH bins (device poll). Commands stay in queue
+    until the device acks them via POST /api/bins/commands/ack. So if the
+    device misses the response (e.g. detection flow), the next poll still
+    returns the command.
     """
     pending_cmds = (
         db.query(CommandQueue)
@@ -209,19 +184,58 @@ async def get_all_commands(db: Session = Depends(get_db)):
             CommandQueue.status == "pending",
         )
         .order_by(CommandQueue.created_at)
+        .limit(1)
         .all()
     )
     if not pending_cmds:
         return {"commands": []}
-    response_cmds = []
-    for cmd in pending_cmds:
-        d = cmd.to_dict()
-        d["bin_id"] = cmd.bin_id
-        response_cmds.append(d)
+    cmd = pending_cmds[0]
+    d = cmd.to_dict()
+    d["bin_id"] = cmd.bin_id
+    print(f"📤 Returning 1 command (device must ack): id={cmd.id} {cmd.command} {cmd.bin_id}")
+    return {"commands": [d]}
+
+
+class CommandAck(BaseModel):
+    ids: List[int]
+
+
+@app.post("/api/bins/commands/ack")
+async def ack_commands(ack: CommandAck, db: Session = Depends(get_db)):
+    """
+    Device acknowledges it executed these commands; they are removed from the queue.
+    Call this after executing a command from GET /api/bins/commands.
+    """
+    if not ack.ids:
+        return {"acked": 0}
+    deleted = 0
+    for cid in ack.ids:
+        cmd = db.query(CommandQueue).filter(CommandQueue.id == cid).first()
+        if cmd:
+            db.delete(cmd)
+            deleted += 1
+    db.commit()
+    print(f"✅ Device acked {deleted} command(s): {ack.ids}")
+    return {"acked": deleted}
+
+
+@app.get("/api/bins/{bin_id}/commands")
+async def get_commands(bin_id: str, db: Session = Depends(get_db)):
+    """
+    Get pending commands for a single bin (Poll & Pop). App/legacy use.
+    """
+    pending_cmds = (
+        db.query(CommandQueue)
+        .filter(CommandQueue.bin_id == bin_id, CommandQueue.status == "pending")
+        .all()
+    )
+    if not pending_cmds:
+        return {"commands": []}
+    response_cmds = [cmd.to_dict() for cmd in pending_cmds]
     for cmd in pending_cmds:
         db.delete(cmd)
     db.commit()
-    print(f"🚀 Sent {len(response_cmds)} commands (combined)")
+    print(f"🚀 Sent {len(response_cmds)} commands to {bin_id}")
     return {"commands": response_cmds}
 
 
